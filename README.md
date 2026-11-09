@@ -49,16 +49,38 @@ curl -fsSL https://raw.githubusercontent.com/saali2901/recode/main/install.sh | 
 irm https://raw.githubusercontent.com/saali2901/recode/main/install.ps1 | iex
 ```
 
-The installer shows what it is going to do and asks once before changing anything (`-y` skips the question,
-`--dry-run` only prints the plan). It does not need a pre-installed Node.js: if yours is missing or too old, it downloads the
-official Node.js build and verifies its SHA-256. System packages (JDK, compiler, CMake, Ninja) are installed with
-`apt`, `dnf`, `pacman`, Homebrew or (Windows) `winget`; `sudo` asks for your password when required, Windows may show UAC prompts. On Windows the C compiler is MinGW-w64 (gcc). Ghidra is downloaded from the
-official GitHub release and verified against its published SHA-256; Claude Code is installed into ReCode's own folder.
-A download that fails its checksum is deleted and nothing is installed from it.
+### What gets installed
 
-Everything lives in `~/.local/share/recode` (program, Node.js, Ghidra, Claude Code), the command in `~/.local/bin/recode`,
-settings in `~/.config/recode`. To uninstall, delete these three. If `~/.local/bin` is not in your `PATH`, the installer
-prints the one line to add.
+| Tool                             | How                                                                                                                                                                           | Where                                                                                                       |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Node.js ≥ 20.11                  | only if missing: official build, SHA-256 verified (Windows: winget)                                                                                                           | `~/.local/share/recode/node`                                                                                |
+| ReCode                           | `git clone` + build                                                                                                                                                           | Linux/macOS: `~/.local/share/recode/app`, command `~/.local/bin/recode`<br>Windows: `%LOCALAPPDATA%\recode` |
+| JDK 21, C compiler, CMake, Ninja | system package manager: `apt`, `dnf`, `pacman`, Homebrew, or `winget` on Windows (compiler there: MinGW-w64 gcc). `sudo` asks for your password; Windows may show UAC prompts | system locations                                                                                            |
+| Ghidra                           | latest official GitHub release, SHA-256 verified; a download that fails the check is deleted                                                                                  | `~/.local/share/recode/ghidra`                                                                              |
+| Claude Code                      | `npm install` into ReCode's own folder (no admin rights)                                                                                                                      | `~/.local/share/recode/npm`                                                                                 |
+
+Settings are stored in `~/.config/recode`. To uninstall ReCode, delete these folders and the `recode` command (system
+packages stay). If the `recode` command is not found, the installer prints the one line that adds its folder to your `PATH`.
+
+### Preview, confirm, or run unattended
+
+By default the installer **shows what it will do and asks once** before changing anything. The options differ in
+whether anything is changed:
+
+| Mode                            | Changes your system?                                                                  | Command                                                                           |
+| ------------------------------- | ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| **`--dry-run`** (preview)       | **No.** Prints every step it would run and exits. Nothing is downloaded or installed. | `recode setup --dry-run`<br>`curl -fsSL <url>/install.sh \| bash -s -- --dry-run` |
+| default                         | Yes, **after you confirm** with `y`                                                   | `recode setup` / the install commands above                                       |
+| **`--yes`** / `-y` (unattended) | Yes, **without asking**                                                               | `recode setup --yes`<br>`curl -fsSL <url>/install.sh \| bash -s -- -y`            |
+
+- `recode setup` only installs what `recode doctor` reports as missing, so it is safe to run again at any time. Use
+  `--only packages,ghidra,claude` to install just a part.
+- `install.sh` additionally supports `--no-setup` (install ReCode but not the other tools).
+- `install.ps1` has no `--dry-run`, because `irm | iex` cannot take parameters. Preview on Windows with
+  `$env:RECODE_NO_SETUP=1` before running the installer, then `recode setup --dry-run`. Other switches are environment
+  variables: `RECODE_REF` / `RECODE_REPO` (install another branch or fork) and `RECODE_WSL=1` (use WSL2 instead of native Windows).
+- Prefer to read the script first? Download, read, then run it: `curl -fsSL <url>/install.sh -o install.sh && less install.sh && bash install.sh`.
+  Manual installation steps: [docs/installation.md](docs/installation.md).
 
 **One thing no installer can do for you:** log in to Claude Code once with your own subscription:
 
@@ -66,11 +88,6 @@ prints the one line to add.
 claude        # sign in, then exit
 recode doctor # every line should show ✓
 ```
-
-Already have some tools? `recode setup` installs only what `recode doctor` reports as missing
-(`recode setup --dry-run` shows the plan). Want to read the script first? Download it, read it, then run it:
-`curl -fsSL <url>/install.sh -o install.sh && less install.sh && bash install.sh`. Manual installation steps:
-[docs/installation.md](docs/installation.md).
 
 ## Quick start
 
