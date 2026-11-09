@@ -10,6 +10,10 @@ export type ErrorCode =
   | 'PARSE'
   | 'WORKFLOW'
   | 'CANCELLED'
+  /** The Claude subscription's usage limit is exhausted; retrying immediately is pointless. */
+  | 'RATE_LIMIT'
+  /** Claude Code does not trust the project folder and ignores its permission rules. */
+  | 'UNTRUSTED'
   | 'INTERNAL';
 
 /** Process exit codes used by the CLI. */
@@ -34,6 +38,8 @@ const EXIT_CODE_BY_ERROR: Record<ErrorCode, number> = {
   PARSE: ExitCode.ToolFailed,
   WORKFLOW: ExitCode.Failure,
   CANCELLED: ExitCode.Cancelled,
+  RATE_LIMIT: ExitCode.ToolFailed,
+  UNTRUSTED: ExitCode.Prerequisite,
   INTERNAL: ExitCode.Failure,
 };
 

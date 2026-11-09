@@ -84,6 +84,29 @@ emit({
 emit({ type: 'future_event_type_nobody_knows', data: 1 });
 process.stdout.write('this line is not json\n');
 
+if (mode === 'ratelimit') {
+  emit({
+    type: 'result',
+    subtype: 'success',
+    is_error: true,
+    result: "You've hit your 5-hour limit · resets 1:50pm (Europe/Berlin)",
+    session_id: 'mock-session',
+  });
+  process.exit(0);
+}
+if (mode === 'untrusted') {
+  process.stderr.write(
+    'Ignoring 4 permissions.allow entries from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog.\n',
+  );
+  emit({
+    type: 'result',
+    subtype: 'success',
+    is_error: false,
+    result: 'I could not write the file.',
+    session_id: 'mock-session',
+  });
+  process.exit(0);
+}
 if (mode === 'crash') {
   process.stderr.write('mock claude crashed\n');
   process.exit(1);

@@ -2,6 +2,19 @@ import { RecodeError } from '../../core/errors/index.js';
 import { runProcess, type RunResult } from '../../infrastructure/process/process-manager.js';
 import { parseStreamLine, type ClaudeEvent } from './events.js';
 
+export type BlockReason = 'rate-limit' | 'untrusted';
+
+const RATE_LIMIT_PATTERN =
+  /(hit|reached|exceeded) your [\w -]{0,30}limit|usage limit|rate[ -]?limit|limit[^.]{0,30}resets?/i;
+const UNTRUSTED_PATTERN = /has not been trusted|not been trusted/i;
+
+/** Recognizes failures that retrying cannot fix: exhausted subscription limit, untrusted workspace. */
+export function classifyBlock(resultText: string, stderr: string): BlockReason | undefined {
+  if (RATE_LIMIT_PATTERN.test(resultText)) return 'rate-limit';
+  if (UNTRUSTED_PATTERN.test(stderr)) return 'untrusted';
+  return undefined;
+}
+
 export interface ClaudeRunOptions {
   /** Executable name or path of the Claude Code CLI. */
   command: string;
@@ -34,8 +47,22 @@ export interface ClaudeRunResult {
   subagentsStarted: string[];
   unknownEventTypes: string[];
   failure: string | undefined;
+  /** Set when the session was stopped by a condition that retrying cannot fix. */
+  blocked: BlockReason | undefined;
   raw: RunResult;
 }
+
+export const DENIED_TOOLS = [
+  'Bash',
+  'WebFetch',
+  'WebSearch',
+  'Edit(/.claude/**)',
+  'Edit(/.recode/**)',
+  'Edit(/input/**)',
+  'Edit(/analysis/**)',
+  'Edit(/source/**)',
+  'Edit(/recode.json)',
+];
 
 /** Builds the argument vector for a headless, non-interactive Claude Code session. */
 export function buildClaudeArguments(options: ClaudeRunOptions): string[] {
@@ -59,6 +86,10 @@ export function buildClaudeArguments(options: ClaudeRunOptions): string[] {
     options.availableTools.join(','),
     '--allowedTools',
     options.allowedTools.join(','),
+    // Repeated here so that the restrictions hold even if Claude ignores the project's settings.json
+    // (it does so for folders it does not trust).
+    '--disallowedTools',
+    DENIED_TOOLS.join(','),
   ];
   if (options.model) args.push('--model', options.model);
   return args;
@@ -115,6 +146,7 @@ export async function runClaude(options: ClaudeRunOptions): Promise<ClaudeRunRes
     subagentsStarted,
     unknownEventTypes: [...unknownEventTypes],
     failure,
+    blocked: classifyBlock(`${final?.text ?? ''} ${failure ?? ''}`, raw.stderr),
     raw,
   };
 }

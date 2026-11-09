@@ -331,4 +331,78 @@ describe('complete workflow with fake Ghidra and mock Claude (real cmake/ninja/g
     expect(resumed.code, resumed.stderr).toBe(0);
     expect(resumed.stdout).toContain('6 reconstructed');
   });
+
+  it('stops at once when the Claude usage limit is reached, without using up attempts, and resumes later', async () => {
+    const world = await createWorld();
+    const id = await importSample(world);
+    await world.run(['analyze'], { overrides: HERMETIC });
+    world.setEnv('MOCK_CLAUDE_MODE', 'ratelimit');
+    const limited = await world.run(['reconstruct'], { overrides: HERMETIC });
+    expect(limited.code).toBe(5);
+    expect(limited.stderr).toContain('usage limit reached');
+    expect(limited.stderr).toContain('5-hour limit');
+    expect(limited.stderr).toContain('no attempts were used up');
+    expect(await world.claudeInvocations()).toHaveLength(1); // no pointless retries
+
+    const project = await Project.open(world.projectDir);
+    const store = new TaskStore(project.tasksFile(id));
+    await store.load();
+    expect(store.get('overview')).toMatchObject({ status: 'pending', attempts: 0 });
+
+    world.setEnv('MOCK_CLAUDE_MODE', 'ok');
+    const resumed = await world.run(['reconstruct'], { overrides: HERMETIC });
+    expect(resumed.code, resumed.stderr).toBe(0);
+    expect(resumed.stdout).toContain('6 reconstructed');
+  });
+
+  it('explains an untrusted project folder, and "recode trust" fixes it without clobbering Claude settings', async () => {
+    const world = await createWorld();
+    const claudeDir = path.join(world.root, 'claude-config');
+    await fs.mkdir(claudeDir);
+    await fs.writeFile(
+      path.join(claudeDir, '.claude.json'),
+      JSON.stringify({
+        theme: 'dark',
+        projects: { '/other': { hasTrustDialogAccepted: true, extra: 1 } },
+      }),
+    );
+    world.setEnv('CLAUDE_CONFIG_DIR', claudeDir);
+    await importSample(world);
+    await world.run(['analyze'], { overrides: HERMETIC });
+
+    world.setEnv('MOCK_CLAUDE_MODE', 'untrusted');
+    const blocked = await world.run(['reconstruct'], { overrides: HERMETIC });
+    expect(blocked.code).toBe(3);
+    expect(blocked.stderr).toContain('does not trust this project folder');
+    expect(blocked.stderr).toContain('recode trust');
+    expect(await world.claudeInvocations()).toHaveLength(1);
+
+    const trusted = await world.run(['trust']);
+    expect(trusted.code, trusted.stderr).toBe(0);
+    const config = JSON.parse(await fs.readFile(path.join(claudeDir, '.claude.json'), 'utf8'));
+    expect(config.theme).toBe('dark');
+    expect(config.projects['/other']).toEqual({ hasTrustDialogAccepted: true, extra: 1 });
+    expect(config.projects[path.resolve(world.projectDir)]).toEqual({
+      hasTrustDialogAccepted: true,
+    });
+    expect((await world.run(['trust'])).stdout).toContain('already trusted');
+
+    // A corrupt Claude config is never overwritten.
+    await fs.writeFile(path.join(claudeDir, '.claude.json'), '{broken');
+    const refused = await world.run(['trust']);
+    expect(refused.code).not.toBe(0);
+    expect(await fs.readFile(path.join(claudeDir, '.claude.json'), 'utf8')).toBe('{broken');
+  });
+
+  it('keeps the tool restrictions on the command line even if project settings are ignored', async () => {
+    const world = await createWorld();
+    await importSample(world);
+    await world.run(['analyze'], { overrides: HERMETIC });
+    await world.run(['reconstruct'], { overrides: HERMETIC });
+    const [first] = await world.claudeInvocations();
+    const denied = first!.args[first!.args.indexOf('--disallowedTools') + 1]!;
+    expect(denied.split(',')).toEqual(
+      expect.arrayContaining(['Bash', 'WebFetch', 'Edit(/analysis/**)', 'Edit(/source/**)']),
+    );
+  });
 });

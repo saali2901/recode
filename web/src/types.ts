@@ -43,6 +43,7 @@ export interface JobInfo {
   finishedAt?: string;
   summary?: string;
   error?: string;
+  errorCode?: string;
   hint?: string;
 }
 

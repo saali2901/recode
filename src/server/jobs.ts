@@ -33,6 +33,8 @@ export interface JobInfo {
   finishedAt?: string;
   summary?: string;
   error?: string;
+  /** Machine-readable cause, e.g. RATE_LIMIT or UNTRUSTED, so the UI can offer the right action. */
+  errorCode?: string;
   hint?: string;
 }
 
@@ -115,6 +117,7 @@ export class JobManager {
         outcome = {
           status: cancelled ? 'cancelled' : 'failed',
           error: errorMessage(error),
+          ...(error instanceof RecodeError ? { errorCode: error.code } : {}),
           ...(error instanceof RecodeError && error.hint ? { hint: error.hint } : {}),
         };
       }

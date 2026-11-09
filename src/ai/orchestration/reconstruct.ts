@@ -9,6 +9,7 @@ import type { FunctionInfo } from '../../decompiler/interfaces/schemas.js';
 import type { RecodeConfig } from '../../infrastructure/config/config.js';
 import { pathExists, readJson, sha256Text } from '../../infrastructure/filesystem/files.js';
 import { CTargetLanguage, functionTaskId } from '../../reconstruction/c/c-generator.js';
+import type { BlockReason } from '../claude/runner.js';
 import {
   FunctionResultSchema,
   TypesResultSchema,
@@ -129,10 +130,14 @@ export async function reconstruct(
     };
 
     let sessionFailure: string | undefined;
+    let blocked: BlockReason | undefined;
+    let blockedText = '';
     try {
       const outcome = await deps.runSession(request);
       totalCostUsd += outcome.costUsd ?? 0;
       sessionFailure = outcome.failure;
+      blocked = outcome.blocked;
+      blockedText = outcome.resultText || outcome.failure || '';
     } catch (error) {
       if (error instanceof RecodeError && error.code === 'CANCELLED') {
         for (const task of batch) await store.update(task.id, { status: 'pending' });
@@ -142,11 +147,16 @@ export async function reconstruct(
     }
 
     // Results are accepted even if the session ended abnormally: files that validate are real progress.
+    let reverted = 0;
     for (const task of batch) {
       const verdict = await results.accept(task, byTaskId.get(task.id));
       if (verdict.ok) {
         await store.complete(task.id);
         events.emit({ type: 'task-completed', taskId: task.id, label: task.title });
+      } else if (blocked) {
+        // Not the task's fault: do not count the attempt, stop below.
+        await store.revert(task.id);
+        reverted++;
       } else {
         const message = sessionFailure
           ? `${verdict.error} (session: ${sessionFailure})`
@@ -155,6 +165,7 @@ export async function reconstruct(
         events.emit({ type: 'task-failed', taskId: task.id, label: task.title, message });
       }
     }
+    if (blocked && reverted > 0) throw blockedError(blocked, blockedText, project);
   }
 
   const generation = await new CTargetLanguage().generateProject({
@@ -179,6 +190,28 @@ export async function reconstruct(
       .filter((t) => t.status === 'failed')
       .map((t) => ({ id: t.id, error: t.lastError ?? 'unknown' })),
   };
+}
+
+/** Error for sessions that retrying cannot fix; progress so far is saved and the tasks stay pending. */
+export function blockedError(reason: BlockReason, text: string, project: Project): RecodeError {
+  if (reason === 'rate-limit') {
+    return new RecodeError(
+      'RATE_LIMIT',
+      `Claude Code usage limit reached: ${text.trim().slice(0, 300) || 'no details'}`,
+      {
+        hint: 'Progress is saved and no attempts were used up. Start the step again after the limit has reset.',
+      },
+    );
+  }
+  return new RecodeError(
+    'UNTRUSTED',
+    'Claude Code does not trust this project folder and therefore ignores its permission rules.',
+    {
+      hint:
+        `Run "recode trust" in ${project.root} (or click "Trust this project" in the web interface), ` +
+        'or start "claude" once in this folder and accept the trust dialog. Then run the step again.',
+    },
+  );
 }
 
 function agentFor(task: Task): string {

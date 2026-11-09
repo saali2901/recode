@@ -125,7 +125,7 @@ export function SimpleStepPanel({
         onCancel={() => void cancel()}
       />
       {error && <ErrorAlert error={error} title="Cannot start" />}
-      <JobPanel stream={stream} label={step} />
+      <JobPanel stream={stream} label={step} project={props.project} />
     </div>
   );
 }
@@ -268,7 +268,7 @@ export function ReconstructPanel(props: RunProps) {
           </ul>
         </div>
       </div>
-      <JobPanel stream={stream} label="reconstruct" />
+      <JobPanel stream={stream} label="reconstruct" project={project} />
     </div>
   );
 }
@@ -316,7 +316,7 @@ export function ValidatePanel(props: RunProps) {
         }
       />
       {error && <ErrorAlert error={error} title="Cannot start" />}
-      <JobPanel stream={stream} label="validate" showLog={aiReview || running} />
+      <JobPanel stream={stream} label="validate" project={project} showLog={aiReview || running} />
       {report.data && (
         <div className="stack gap-3">
           <div className="table-wrap">

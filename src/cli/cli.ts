@@ -8,6 +8,7 @@ import { registerInspect } from './commands/inspect.js';
 import { registerLogs } from './commands/logs.js';
 import { registerSetup } from './commands/setup.js';
 import { registerStatus } from './commands/status.js';
+import { registerTrust } from './commands/trust.js';
 import { registerUi } from './commands/ui.js';
 import { registerStepCommands } from './commands/steps.js';
 import { Output, type OutputStreams } from './formatters/output.js';
@@ -61,6 +62,7 @@ export function buildProgram(
   registerConfig(program, runtime);
   registerUi(program, runtime);
   registerSetup(program, runtime);
+  registerTrust(program, runtime);
   return program;
 }
 

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { api, projectPath } from '../api';
 import { formatDuration } from '../format';
 import { useNow, type LogLine, type StreamState } from '../hooks';
 import type { JobInfo } from '../types';
@@ -47,7 +48,16 @@ export function LogView({ lines }: { lines: LogLine[] }) {
   );
 }
 
-export function JobStatus({ job, label }: { job: JobInfo | null; label: string }) {
+export function JobStatus({
+  job,
+  label,
+  project,
+}: {
+  job: JobInfo | null;
+  label: string;
+  project?: string | undefined;
+}) {
+  const [trusted, setTrusted] = useState<string>();
   const running = job?.status === 'running';
   const now = useNow(running);
   if (!job) return null;
@@ -63,14 +73,47 @@ export function JobStatus({ job, label }: { job: JobInfo | null; label: string }
       {job.status === 'completed' && job.summary && <p className="text-sm">{job.summary}</p>}
       {(job.status === 'failed' || job.status === 'cancelled') && job.error && (
         <div
-          className={`alert ${job.status === 'failed' ? 'alert--danger' : 'alert--warning'}`}
+          className={`alert ${job.status === 'failed' && job.errorCode !== 'RATE_LIMIT' ? 'alert--danger' : 'alert--warning'}`}
           role="alert"
         >
           <div className="alert__content">
-            <p className="alert__title">{job.status === 'failed' ? 'Step failed' : 'Cancelled'}</p>
+            <p className="alert__title">
+              {job.errorCode === 'RATE_LIMIT'
+                ? 'Claude usage limit reached'
+                : job.errorCode === 'UNTRUSTED'
+                  ? 'Claude Code does not trust this project folder'
+                  : job.status === 'failed'
+                    ? 'Step failed'
+                    : 'Cancelled'}
+            </p>
             <p>{job.error}</p>
             {job.hint && <pre className="hint-block">{job.hint}</pre>}
             {job.status === 'cancelled' && <p>Progress is saved. Run the step again to resume.</p>}
+            {job.errorCode === 'UNTRUSTED' && project && (
+              <div className="stack gap-2">
+                <p className="text-sm">
+                  This marks the folder as trusted in Claude Code&apos;s own settings (the same as
+                  accepting its trust dialog).
+                </p>
+                <div>
+                  <button
+                    className="btn btn--primary btn--small"
+                    type="button"
+                    onClick={() => {
+                      api
+                        .post(`${projectPath(project)}/trust`)
+                        .then(() => setTrusted('Trusted. Start the step again.'))
+                        .catch((e: unknown) =>
+                          setTrusted(e instanceof Error ? e.message : String(e)),
+                        );
+                    }}
+                  >
+                    Trust this project
+                  </button>
+                </div>
+                {trusted && <p role="status">{trusted}</p>}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -82,15 +125,17 @@ export function JobStatus({ job, label }: { job: JobInfo | null; label: string }
 export function JobPanel({
   stream,
   label,
+  project,
   showLog = true,
 }: {
   stream: StreamState;
   label: string;
+  project?: string;
   showLog?: boolean;
 }) {
   return (
     <div className="stack gap-4">
-      <JobStatus job={stream.job} label={label} />
+      <JobStatus job={stream.job} label={label} project={project} />
       {showLog && stream.job && <LogView lines={stream.lines} />}
     </div>
   );
