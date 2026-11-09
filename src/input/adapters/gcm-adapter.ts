@@ -11,6 +11,7 @@ import type {
 } from '../interfaces/types.js';
 import { FileView, TruncatedError } from '../parsers/binary-reader.js';
 import { dolMetadata } from '../parsers/dol.js';
+import { dolSmallDataBases } from '../parsers/ppc-startup.js';
 import { classifyDisc, GCM_HEADER_SIZE, parseGcmHeader, readBootDol } from '../parsers/gcm.js';
 
 /**
@@ -93,7 +94,8 @@ export class GcmAdapter implements InputAdapter {
     try {
       const header = parseGcmHeader(view.read(0, GCM_HEADER_SIZE), view.size);
       const { image, data } = readBootDol(view, header.dolOffset);
-      return { metadata: dolMetadata(image, header.game), data };
+      const registers = dolSmallDataBases(image, (o, l) => data.subarray(o, o + l));
+      return { metadata: dolMetadata(image, { game: header.game, registers }), data };
     } catch (error) {
       if (error instanceof TruncatedError) {
         throw new RecodeError(

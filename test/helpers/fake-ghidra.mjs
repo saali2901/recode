@@ -43,8 +43,12 @@ function main() {
     if (!fs.existsSync(path.join(scriptPath, 'ImportDol.java'))) fail('ImportDol.java not found');
     const scriptArgs = args.slice(preIndex + 2, args.indexOf('-postScript'));
     if (!/^0x[0-9a-f]+$/.test(scriptArgs[0] ?? '')) fail('ImportDol.java: entry address missing');
+    // Real Ghidra splits script arguments at commas (seen with 12.2), so no argument may contain one.
+    if (scriptArgs.some((a) => a.includes(',')))
+      fail('ImportDol.java: script argument contains a comma');
     for (const layout of scriptArgs.slice(1)) {
-      if (!/^[.\w]+,0x[0-9a-f]+,0x[0-9a-f]+,(0x[0-9a-f]+|-),[r-][w-][x-]$/.test(layout))
+      if (/^reg:r\d+:0x[0-9a-f]+$/.test(layout)) continue;
+      if (!/^[.\w]+:0x[0-9a-f]+:0x[0-9a-f]+:(0x[0-9a-f]+|-):[r-][w-][x-]$/.test(layout))
         fail(`ImportDol.java: invalid section description ${layout}`);
     }
     if (args[args.indexOf('-loader') + 1] !== 'BinaryLoader') fail('DOL needs BinaryLoader');

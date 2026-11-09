@@ -1,14 +1,20 @@
 // Rebuilds the memory map of a GameCube/Wii DOL executable.
 // ReCode imports the DOL with Ghidra's BinaryLoader (the whole file as one block at address 0) and runs this as
 // -preScript. The script replaces that block by the DOL's real sections, taken from the same file bytes.
-// Usage: ImportDol.java <entryAddress> <name,address,size,fileOffset|-,perms>...
+// Usage: ImportDol.java <entryAddress> (<name:address:size:fileOffset|-:perms> | <reg:register:value>)...
+// A "reg" argument fixes a register (e.g. the PowerPC small-data anchors r2/r13) to a constant in all code,
+// which lets the decompiler show small-data accesses as plain globals.
 //@category ReCode
 
 import ghidra.app.script.GhidraScript;
 import ghidra.program.database.mem.FileBytes;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.mem.Memory;
+import ghidra.program.model.lang.Register;
+import ghidra.program.model.listing.ProgramContext;
 import ghidra.program.model.mem.MemoryBlock;
+
+import java.math.BigInteger;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -20,7 +26,7 @@ public class ImportDol extends GhidraScript {
 		String[] args = getScriptArgs();
 		if (args.length < 2) {
 			throw new IllegalArgumentException(
-				"usage: ImportDol.java <entryAddress> <name,address,size,fileOffset|-,perms>...");
+				"usage: ImportDol.java <entryAddress> (<name:address:size:fileOffset|-:perms> | <reg:register:value>)...");
 		}
 		Memory memory = currentProgram.getMemory();
 		List<FileBytes> allFileBytes = memory.getAllFileBytes();
@@ -33,8 +39,14 @@ public class ImportDol extends GhidraScript {
 			memory.removeBlock(block, monitor);
 		}
 
+		List<MemoryBlock> codeBlocks = new ArrayList<>();
+		List<String[]> registers = new ArrayList<>();
 		for (int i = 1; i < args.length; i++) {
-			String[] part = args[i].split(",");
+			String[] part = args[i].split(":");
+			if (part.length == 3 && "reg".equals(part[0])) {
+				registers.add(part);
+				continue;
+			}
 			if (part.length != 5) {
 				throw new IllegalArgumentException("invalid section description: " + args[i]);
 			}
@@ -57,6 +69,21 @@ public class ImportDol extends GhidraScript {
 			block.setRead(perms.charAt(0) == 'r');
 			block.setWrite(perms.charAt(1) == 'w');
 			block.setExecute(perms.charAt(2) == 'x');
+			if (block.isExecute()) {
+				codeBlocks.add(block);
+			}
+		}
+
+		ProgramContext context = currentProgram.getProgramContext();
+		for (String[] register : registers) {
+			Register reg = currentProgram.getRegister(register[1]);
+			if (reg == null) {
+				throw new IllegalArgumentException("unknown register: " + register[1]);
+			}
+			BigInteger value = BigInteger.valueOf(parseHex(register[2]));
+			for (MemoryBlock block : codeBlocks) {
+				context.setValue(reg, block.getStart(), block.getEnd(), value);
+			}
 		}
 
 		Address entry = toAddr(parseHex(args[0]));

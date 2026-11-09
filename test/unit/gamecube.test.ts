@@ -169,8 +169,8 @@ describe('Ghidra import plan', () => {
         'ImportDol.java',
       ]),
     );
-    expect(plan.args).toContain('.text0,0x80003100,0x40,0x100,r-x');
-    expect(plan.args).toContain('.bss,0x80005000,0x100,-,rw-');
+    expect(plan.args).toContain('.text0:0x80003100:0x40:0x100:r-x');
+    expect(plan.args).toContain('.bss:0x80005000:0x100:-:rw-');
   });
 
   it('falls back to generic PowerPC with a warning when Ghidra lacks Gekko', async () => {
@@ -254,5 +254,41 @@ describe('compressed discs via Dolphin', () => {
     );
     const silent = await withConverter(command, { FAKE_DOLPHIN_MODE: 'noop' });
     await expect(silent.prepare(await rvz(), await makeTempDir())).rejects.toThrow(/no ISO/);
+  });
+});
+
+describe('small-data registers in the DOL metadata and import plan', () => {
+  function dolWithStartup(): Buffer {
+    const words = [
+      (15 << 26) | (2 << 21) | 0x8001, // lis r2,0x8001
+      (24 << 26) | (2 << 21) | (2 << 16) | 0xcfd8, // ori r2,r2,0xcfd8
+      (15 << 26) | (13 << 21) | 0x8002, // lis r13,0x8002
+      (24 << 26) | (13 << 21) | (13 << 16) | 0x2a0c, // ori r13,r13,0x2a0c
+      0x4e80_0020,
+    ];
+    const text = Buffer.alloc(0x40, 0x60);
+    words.forEach((w, i) => text.writeUInt32BE(w >>> 0, i * 4));
+    return buildDol({ text: { slot: 0, address: 0x8000_3100, data: text } });
+  }
+
+  it('records r2/r13 found in the startup code, for DOLs and for discs', async () => {
+    const dol = dolWithStartup();
+    const fromDol = await adapter('dol').getMetadata(await write('s.dol', dol));
+    expect(fromDol.initialRegisters).toEqual({ r2: '0x8001cfd8', r13: '0x80022a0c' });
+    const [fromDisc] = await adapter('gcm').prepare(
+      await write('s.iso', buildGcm(dol)),
+      await makeTempDir(),
+    );
+    expect(fromDisc?.metadata.initialRegisters).toEqual({ r2: '0x8001cfd8', r13: '0x80022a0c' });
+  });
+
+  it('hands the registers to Ghidra and leaves them out when nothing was found', async () => {
+    const withRegisters = await adapter('dol').getMetadata(await write('s.dol', dolWithStartup()));
+    expect(planImport(withRegisters, {}).args).toEqual(
+      expect.arrayContaining(['reg:r2:0x8001cfd8', 'reg:r13:0x80022a0c']),
+    );
+    const without = await adapter('dol').getMetadata(await write('p.dol', buildDol()));
+    expect(without.initialRegisters).toBeUndefined();
+    expect(planImport(without, {}).args.some((a) => a.startsWith('reg:'))).toBe(false);
   });
 });

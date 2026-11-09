@@ -75,7 +75,11 @@ public class ExportAnalysis extends GhidraScript {
 
 	private void createEntryFunction(String entry) throws Exception {
 		Address address = toAddr(entry);
-		if (address != null && getFunctionAt(address) == null) {
+		if (address == null || !currentProgram.getMemory().contains(address)) {
+			throw new IllegalStateException("Entry point " + entry
+				+ " is not in program memory; the import script probably failed (see the log).");
+		}
+		if (getFunctionAt(address) == null) {
 			disassemble(address);
 			createFunction(address, null);
 			analyzeChanges(currentProgram);

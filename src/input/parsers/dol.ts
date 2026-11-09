@@ -115,7 +115,13 @@ export function dolPermissions(kind: DolSection['kind']): string {
 }
 
 /** Converts a validated DOL into the format-independent metadata used by the rest of ReCode. */
-export function dolMetadata(image: DolImage, game?: BinaryMetadata['game']): BinaryMetadata {
+export function dolMetadata(
+  image: DolImage,
+  extra: {
+    game?: BinaryMetadata['game'];
+    registers?: { r2?: number; r13?: number };
+  } = {},
+): BinaryMetadata {
   const sections: BinaryMetadata['sections'] = image.sections.map((s) => ({
     name: s.name,
     address: hex(s.address),
@@ -152,7 +158,14 @@ export function dolMetadata(image: DolImage, game?: BinaryMetadata['game']): Bin
     symbols: [],
     symbolsTruncated: false,
     platform: 'gamecube',
-    ...(game ? { game } : {}),
+    ...(extra.game ? { game: extra.game } : {}),
+    ...(extra.registers && Object.keys(extra.registers).length > 0
+      ? {
+          initialRegisters: Object.fromEntries(
+            Object.entries(extra.registers).map(([name, value]) => [name, hex(value)]),
+          ),
+        }
+      : {}),
     source: 'headers',
     warnings: [
       'DOL files carry no symbols; names come from Ghidra analysis only. Wii DOLs that use MEM2 (0x90000000) are not supported.',

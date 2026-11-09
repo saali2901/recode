@@ -94,7 +94,7 @@ Enforcement: the Stop hook in `.claude/settings.json` and the pre-commit hook (`
 
 ## Known gaps (keep honest)
 
-- GameCube: `ImportDol.java` and the Gekko language choice were never run against a real Ghidra (only against the command-line-compatible fake); only the boot DOL of a disc is extracted (no `.rel` modules, no other disc files); no r2/r13 small-data register setup; no SDK function signatures (names are guesses by the agents); the `dolphin-tool convert` command line was never run against a real Dolphin (only a fake); the temp ISO needs ~1.4 GB free space; Wii/MEM2 unsupported; `recode doctor` only warns (never fails) when Dolphin is missing.
+- GameCube: `ImportDol.java` ran successfully against real Ghidra 12.2 on a devkitPro homebrew DOL (251 functions, entry `__start`); Ghidra 12.2 has no Gekko language, so paired-singles decode wrongly (generic PowerPC fallback + warning); only the boot DOL of a disc is extracted (no `.rel` modules, no other disc files); r2/r13 are found by a narrow scan of the startup code (`parsers/ppc-startup.ts`: follows up to 3 jumps, reads `lis`/`addi`/`ori` pairs) and silently skipped when the pattern differs; no SDK function signatures (names are guesses by the agents); the `dolphin-tool convert` command line was never run against a real Dolphin (only a fake); the temp ISO needs ~1.4 GB free space; Wii/MEM2 unsupported; `recode doctor` only warns (never fails) when Dolphin is missing.
 - ELF-based tests need a Linux `gcc` fixture (`test/fixtures/build/sample-x86_64`); on native Windows they fail for that reason, not because of the code.
 - Native Windows (winget, `.cmd` launching, Claude permission rules with `C:/` paths) is only partly verified by the owner's manual runs; Ghidra 12.2 import worked, `ExportAnalysis.java` was not confirmed against real Ghidra output yet unless noted in the change log.
 - No functional-equivalence or fidelity check (reported `not-assessed`).
@@ -108,6 +108,8 @@ Enforcement: the Stop hook in `.claude/settings.json` and the pre-commit hook (`
 
 ## Change log (newest first)
 
+- 2026-11-09 - r2/r13 small-data anchors: `ppc-startup.ts` finds them, `BinaryMetadata.initialRegisters` stores them, `ImportDol.java` fixes the registers in all code blocks (`reg:` arguments). Real Ghidra 12.2: `unaff_r13` accesses dropped from 69 functions to 0, now shown as globals.
+- 2026-11-09 - Fix: Ghidra splits script arguments at commas, so `ImportDol.java` section descriptions use `:`; the fake Ghidra now rejects commas; `ExportAnalysis.java` fails loudly when the entry point is not in memory (was: silent empty analysis). Verified with real Ghidra 12.2.
 - 2026-11-09 - `recode doctor` reports the optional Dolphin tool (warning only).
 - 2026-11-09 - Compressed GameCube discs (RVZ/WIA/GCZ/CISO) via `dolphin-tool`; `which` accepts explicit paths that already carry an executable extension.
 - 2026-11-09 - GameCube support: DOL + ISO adapters (`parsers/dol.ts`, `parsers/gcm.ts`), `platform`/`game` metadata, Ghidra import plan with `ImportDol.java` and Gekko language lookup, platform notes for agents (`templates/platforms/gamecube.md`), tests with synthetic DOL/ISO builders.

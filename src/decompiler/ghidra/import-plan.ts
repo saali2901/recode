@@ -73,11 +73,15 @@ export function planImport(
       );
     }
     const layout = metadata.segments.map((s) =>
-      [s.name ?? 'section', s.address, s.size, s.fileOffset, s.permissions].join(','),
+      [s.name ?? 'section', s.address, s.size, s.fileOffset, s.permissions].join(':'),
     );
     const bss = metadata.sections.find((s) => s.name === '.bss');
     if (bss)
-      layout.push([bss.name, bss.address, bss.size, '-', bss.permissions ?? 'rw-'].join(','));
+      layout.push([bss.name, bss.address, bss.size, '-', bss.permissions ?? 'rw-'].join(':'));
+    // Ghidra splits script arguments at commas, so fields are separated by colons.
+    for (const [name, value] of Object.entries(metadata.initialRegisters ?? {})) {
+      layout.push(['reg', name, value].join(':'));
+    }
     // Ghidra's BinaryLoader maps the whole file at one address; ImportDol.java then replaces that single
     // block with the DOL's real sections taken from the same file bytes.
     return {

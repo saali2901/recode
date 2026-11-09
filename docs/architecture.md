@@ -97,7 +97,9 @@ Dolphin they are rejected with a hint; `recode doctor` shows the tool as an opti
 
 Ghidra has no DOL loader. ReCode imports the file with `BinaryLoader` and runs `ImportDol.java` as `-preScript`: it
 removes the single block, creates one block per DOL section (text `r-x`, data `rw-`, `.bss` uninitialized) from the
-same file bytes, and labels the entry `__start`. The language is `PowerPC:BE:32:Gekko_Broadway` when the installed
+same file bytes, and labels the entry `__start`. If the startup code loads the small-data anchors r2/r13 (found by a
+narrow scan in `ppc-startup.ts`), the script fixes both registers to those constants in all code, so the decompiler
+shows `DAT_8001aa80` instead of `*(int *)(unaff_r13 + -0x7f8c)`. The language is `PowerPC:BE:32:Gekko_Broadway` when the installed
 Ghidra defines it (found by reading its `.ldefs` files); otherwise generic PowerPC is used and a warning is emitted.
 
 **Adding a platform** (PS1, SNES, Wii, ...): add adapter(s) that set `platform` and the real architecture facts, add a
@@ -156,9 +158,9 @@ files (headers, CMake) and cannot conflict.
   one session at a time.
 - Dependency waves: a function is only reconstructed after its callees, so deep call chains need many small sessions
   (this is slower, but yields better prototypes for callers).
-- GameCube: `ImportDol.java` and the Gekko language selection were only tested against the command-line-compatible fake,
-  not a real Ghidra. Only the boot DOL of a disc is extracted (no `.rel` modules or other disc files). Small-data
-  registers r2/r13 are not set up, so Ghidra may not resolve `.sdata` accesses. Discs inside a ZIP are limited by
+- GameCube: `ImportDol.java` was verified with Ghidra 12.2 on one homebrew DOL only. Ghidra 12.2 has no Gekko language, so
+  paired-singles code decodes incorrectly (generic PowerPC fallback). Only the boot DOL of a disc is extracted (no `.rel` modules or other disc files). The r2/r13 scan only
+  recognizes straight `lis`/`addi`/`ori` loads near the entry point; other startup code leaves them unresolved. Discs inside a ZIP are limited by
   `archive.maxFileBytes` (default 512 MiB), so import ISOs directly (uploads up to 2 GiB).
 - C only. The target language is behind the `TargetLanguage` interface but no second language exists.
 - Parsers: no PE import table, no Mach-O function starts, ZIP64/nested archives/encrypted entries unsupported,

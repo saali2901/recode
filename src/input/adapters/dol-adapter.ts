@@ -3,6 +3,7 @@ import { RecodeError } from '../../core/errors/index.js';
 import type { BinaryMetadata, DetectionResult } from '../interfaces/types.js';
 import { type FileView, TruncatedError } from '../parsers/binary-reader.js';
 import { DOL_HEADER_SIZE, dolMetadata, parseDol } from '../parsers/dol.js';
+import { dolSmallDataBases } from '../parsers/ppc-startup.js';
 import { SelfDescribingBinaryAdapter } from './binary-adapter.js';
 
 /**
@@ -20,7 +21,8 @@ export class DolAdapter extends SelfDescribingBinaryAdapter {
 
   protected parse(view: FileView): BinaryMetadata {
     if (view.size < DOL_HEADER_SIZE) throw new TruncatedError('File is smaller than a DOL header');
-    return dolMetadata(parseDol(view.read(0, DOL_HEADER_SIZE), view.size));
+    const image = parseDol(view.read(0, DOL_HEADER_SIZE), view.size);
+    return dolMetadata(image, { registers: dolSmallDataBases(image, (o, l) => view.read(o, l)) });
   }
 
   override async detect(filePath: string): Promise<DetectionResult> {

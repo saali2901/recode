@@ -83,6 +83,8 @@ export const BinaryMetadataSchema = z.object({
   symbols: z.array(BinarySymbolSchema),
   symbolsTruncated: z.boolean().default(false),
   platform: PlatformSchema.optional(),
+  /** Register values the startup code loads (e.g. PowerPC small-data anchors r2/r13); found by code scan, not by header. */
+  initialRegisters: z.record(z.string(), HexSchema).optional(),
   game: GameInfoSchema.optional(),
   /** Where the information came from. "user" means supplied via CLI for raw binaries. */
   source: z.enum(['headers', 'user']).default('headers'),

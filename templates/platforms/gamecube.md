@@ -11,7 +11,8 @@ Static guidance from ReCode (not derived from the binary). The analyzed program 
   r3 (r3:r4 for 64-bit) or f1. Stack pointer r1; r0 and r11/r12 are scratch.
 - **r13** and **r2** are small-data anchors: `lwz r3, -0x7XXX(r13)` reads a global in `.sdata`/`.sbss`,
   `lfs f1, -0x7XXX(r2)` reads a constant in `.sdata2`. Treat these as globals or constants, not as stack or
-  parameters. Ghidra may show them as accesses relative to an unknown register.
+  parameters. ReCode fixes both registers to the values found in the startup code, so these accesses usually appear as
+  named globals (`DAT_8001aa80`). If you still see `unaff_r13`/`unaff_r2`, the anchor was not found; treat it as the same kind of access.
 - Compiler: Metrowerks CodeWarrior. Helper routines such as `_savegpr_NN`, `_restgpr_NN`, `__cvt_fp2unsigned`,
   `__shl2i`, `__div2i` and `__ptmf_scall` are compiler runtime, not game code.
 
