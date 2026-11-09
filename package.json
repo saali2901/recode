@@ -33,7 +33,9 @@
     "build:server": "tsc -p tsconfig.build.json",
     "build:web": "vite build",
     "dev:web": "vite",
-    "test:e2e": "npm run build && RECODE_E2E=1 vitest run test/e2e"
+    "test:e2e": "npm run build && RECODE_E2E=1 vitest run test/e2e",
+    "hooks": "git config core.hooksPath .githooks",
+    "check:docs": "vitest run test/unit/docs-sync.test.ts"
   },
   "dependencies": {
     "commander": "^15.1.0",

@@ -10,6 +10,13 @@ from binaries. See `docs/architecture.md` for the design and `docs/development.m
 - `npm run test:ghidra` / `npm run test:claude` – optional tests against real tools
 - `npm run build` – compile to `dist/`
 
+## Documentation rule (every change)
+
+Use the project skill `.claude/skills/recode-maintainer/SKILL.md`: after every change update the skill (project map,
+commands, decisions, known gaps, change log) and, when users would notice, the short `README.md`. `npm run check`
+includes `test/unit/docs-sync.test.ts`; the Stop hook and the optional pre-commit hook (`npm run hooks`) run
+`scripts/skill-guard.mjs`, which blocks while the documentation is behind.
+
 ## Rules
 
 - Strict TypeScript; no `any`; validate every external or persisted JSON with Zod (`readJson`).
