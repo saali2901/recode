@@ -7,6 +7,8 @@
 #   2. runs the ReCode Linux installer inside Ubuntu
 #   3. creates a "recode" command for PowerShell/cmd that forwards to WSL
 #
+# Test a branch:  $env:RECODE_REF='installer'; $env:RECODE_INSTALL_URL='https://raw.githubusercontent.com/saali2901/recode/installer/install.sh'
+#
 # NOTE: this script has not been tested on a real Windows machine yet. Please report problems.
 
 $ErrorActionPreference = 'Stop'
@@ -29,7 +31,13 @@ if ($installed -notmatch $Distro) {
 }
 
 Say 'Running the ReCode installer inside WSL (Ubuntu)'
-wsl.exe -d $Distro -- bash -lc "curl -fsSL '$InstallUrl' | bash"
+# Optional overrides (e.g. to test a branch) are forwarded into WSL.
+$envPrefix = ''
+foreach ($name in 'RECODE_REF', 'RECODE_REPO') {
+    $value = [Environment]::GetEnvironmentVariable($name)
+    if ($value) { $envPrefix += "$name='$value' " }
+}
+wsl.exe -d $Distro -- bash -lc "curl -fsSL '$InstallUrl' | $envPrefix bash"
 if ($LASTEXITCODE -ne 0) { throw "The installer failed inside WSL (exit code $LASTEXITCODE)." }
 
 $binDir = Join-Path $env:LOCALAPPDATA 'recode\bin'
