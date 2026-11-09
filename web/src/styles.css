@@ -1,0 +1,128 @@
+/* App-specific additions on top of cleanui. Only cleanui tokens are used for colors and spacing. */
+.app-main {
+  padding-block: var(--space-8) var(--space-16);
+}
+.app-navbar {
+  padding-inline: var(--space-6);
+}
+.app-nav {
+  align-self: stretch;
+}
+.theme-switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.skip-link {
+  position: absolute;
+  inset-inline-start: var(--space-2);
+  inset-block-start: -4rem;
+  z-index: 100;
+  background: var(--surface);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+}
+.skip-link:focus {
+  inset-block-start: var(--space-2);
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.project-grid {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.project-grid > li {
+  display: block;
+}
+.project-grid a.card {
+  height: 100%;
+  text-decoration: none;
+  color: inherit;
+}
+
+.dropzone {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-3);
+  padding: var(--space-8);
+  text-align: center;
+  border: 2px dashed var(--border-strong);
+  border-radius: var(--radius-container);
+  background: var(--bg-subtle);
+}
+.dropzone--active {
+  border-color: var(--accent);
+  background: var(--accent-subtle);
+}
+.dropzone__title {
+  font-weight: var(--fw-heading);
+  font-size: 1.125rem;
+  margin: 0;
+}
+.upload-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.raw-form {
+  padding-top: var(--space-2);
+}
+
+.log-heading {
+  margin: 0;
+  font-size: 1rem;
+}
+.log-view {
+  margin: 0;
+  max-height: 22rem;
+  min-height: 8rem;
+  overflow: auto;
+  padding: var(--space-3);
+  background: var(--surface-inverse);
+  color: var(--text-inverse);
+  border-radius: var(--radius-container);
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.hint-block {
+  margin: var(--space-2) 0 0;
+  white-space: pre-wrap;
+  font-size: 0.8125rem;
+}
+.task-table {
+  max-height: 24rem;
+  overflow: auto;
+}
+.activity-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: var(--space-1);
+}
+.config-tag {
+  margin-inline-start: var(--space-2);
+}
+.field--inline {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-2);
+}
+.text-success {
+  color: var(--success-text);
+}
+.text-danger {
+  color: var(--danger-text);
+}

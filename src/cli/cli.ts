@@ -7,6 +7,7 @@ import { registerInit } from './commands/init.js';
 import { registerInspect } from './commands/inspect.js';
 import { registerLogs } from './commands/logs.js';
 import { registerStatus } from './commands/status.js';
+import { registerUi } from './commands/ui.js';
 import { registerStepCommands } from './commands/steps.js';
 import { Output, type OutputStreams } from './formatters/output.js';
 import { createRuntime, type Runtime } from './runtime.js';
@@ -57,6 +58,7 @@ export function buildProgram(
   registerLogs(program, runtime);
   registerDoctor(program, runtime);
   registerConfig(program, runtime);
+  registerUi(program, runtime);
   return program;
 }
 
