@@ -8,6 +8,7 @@ import path from 'node:path';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { z } from 'zod';
+import { trustProject } from '../ai/claude/trust.js';
 import { detectFile, importIntoProject } from '../app/import-file.js';
 import { initProject, PROJECT_NAME_PATTERN } from '../app/init-project.js';
 import { toRecodeError, type RecodeError } from '../core/errors/index.js';
@@ -286,6 +287,11 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
     }
     if (sub === 'jobs' && method === 'POST' && binaryId === 'cancel') {
       return sendJson(res, 200, { cancelled: manager.cancel() });
+    }
+
+    if (sub === 'trust' && method === 'POST') {
+      const result = await trustProject(project.root);
+      return sendJson(res, 200, result);
     }
 
     if (sub === 'events' && method === 'GET') return handleEvents(req, res, url, manager);

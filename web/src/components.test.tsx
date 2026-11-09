@@ -372,3 +372,56 @@ describe('ReconstructPanel', () => {
     });
   });
 });
+
+describe('JobStatus errors', () => {
+  const failed = (patch: object) => ({
+    id: 'j',
+    step: 'reconstruct' as const,
+    binaryId: 'b',
+    status: 'failed' as const,
+    startedAt: new Date().toISOString(),
+    finishedAt: new Date().toISOString(),
+    error: 'boom',
+    ...patch,
+  });
+
+  it('offers a trust button for untrusted folders and calls the API', async () => {
+    const post = vi.spyOn(apiModule.api, 'post').mockResolvedValue({});
+    const { JobStatus } = await import('./components/JobPanel');
+    render(
+      <JobStatus
+        job={failed({
+          errorCode: 'UNTRUSTED',
+          error: 'Claude Code does not trust this project folder',
+        })}
+        label="reconstruct"
+        project="demo"
+      />,
+    );
+    expect(
+      screen.getByText('Claude Code does not trust this project folder', {
+        selector: '.alert__title',
+      }),
+    ).toBeTruthy();
+    await userEvent.click(screen.getByRole('button', { name: 'Trust this project' }));
+    expect(post).toHaveBeenCalledWith('/api/projects/demo/trust');
+    expect(await screen.findByText('Trusted. Start the step again.')).toBeTruthy();
+  });
+
+  it('shows the usage limit as a warning with a clear title, without a trust button', async () => {
+    const { JobStatus } = await import('./components/JobPanel');
+    render(
+      <JobStatus
+        job={failed({
+          errorCode: 'RATE_LIMIT',
+          error: 'Claude Code usage limit reached: resets 1:50pm',
+        })}
+        label="reconstruct"
+        project="demo"
+      />,
+    );
+    expect(screen.getByText('Claude usage limit reached')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Trust this project' })).toBeNull();
+    expect(document.querySelector('.alert--warning')).toBeTruthy();
+  });
+});

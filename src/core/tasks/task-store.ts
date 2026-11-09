@@ -91,6 +91,17 @@ export class TaskStore {
     });
   }
 
+  /** Gives a task back to the queue without counting the attempt (the session never had a chance). */
+  async revert(id: string): Promise<void> {
+    const task = this.get(id);
+    if (!task) return;
+    await this.update(id, {
+      status: 'pending',
+      attempts: Math.max(0, task.attempts - 1),
+      lastError: undefined,
+    });
+  }
+
   /** Marks tasks running and counts the attempt. */
   async start(ids: readonly string[], sessionId?: string): Promise<void> {
     const data = this.requireData();

@@ -484,3 +484,17 @@ describe('settings and doctor', () => {
     expect(response.status).toBe(409);
   });
 });
+
+describe('trust endpoint', () => {
+  it('marks the project folder as trusted for Claude Code', async () => {
+    const api = await setup();
+    const dir = await makeTempDir();
+    api.world.setEnv('CLAUDE_CONFIG_DIR', dir);
+    const first = await api.call('POST', '/api/projects/proj/trust', {});
+    expect(first.status).toBe(200);
+    expect(first.json.alreadyTrusted).toBe(false);
+    const config = JSON.parse(await fs.readFile(path.join(dir, '.claude.json'), 'utf8'));
+    expect(config.projects[path.resolve(api.world.projectDir)].hasTrustDialogAccepted).toBe(true);
+    expect((await api.call('POST', '/api/projects/proj/trust', {})).json.alreadyTrusted).toBe(true);
+  });
+});

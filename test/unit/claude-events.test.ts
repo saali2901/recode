@@ -182,3 +182,34 @@ describe('Claude runner', () => {
     expect(result.failure).toContain('timed out');
   });
 });
+
+describe('blocked sessions', () => {
+  it('recognizes an exhausted usage limit (the real message)', async () => {
+    const { classifyBlock } = await import('../../src/ai/claude/runner.js');
+    expect(classifyBlock("You've hit your 5-hour limit · resets 1:50pm (Europe/Berlin)", '')).toBe(
+      'rate-limit',
+    );
+    expect(classifyBlock('Claude usage limit reached. Your limit will reset at 3pm', '')).toBe(
+      'rate-limit',
+    );
+    expect(classifyBlock('rate limit exceeded', '')).toBe('rate-limit');
+  });
+
+  it('recognizes an untrusted workspace from stderr', async () => {
+    const { classifyBlock } = await import('../../src/ai/claude/runner.js');
+    expect(
+      classifyBlock(
+        '',
+        'Ignoring 4 permissions.allow entries from .claude/settings.json: this workspace has not been trusted.',
+      ),
+    ).toBe('untrusted');
+  });
+
+  it('does not misclassify ordinary results', async () => {
+    const { classifyBlock } = await import('../../src/ai/claude/runner.js');
+    expect(
+      classifyBlock('Reconstructed 3 functions; a loop limit of 10 was kept.', ''),
+    ).toBeUndefined();
+    expect(classifyBlock('done', '')).toBeUndefined();
+  });
+});
