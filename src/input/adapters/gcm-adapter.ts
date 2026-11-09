@@ -5,6 +5,7 @@ import { readHead } from '../../infrastructure/filesystem/files.js';
 import type {
   BinaryMetadata,
   DetectionResult,
+  DiscConverter,
   InputAdapter,
   PreparedBinary,
 } from '../interfaces/types.js';
@@ -19,6 +20,8 @@ import { classifyDisc, GCM_HEADER_SIZE, parseGcmHeader, readBootDol } from '../p
  */
 export class GcmAdapter implements InputAdapter {
   readonly id = 'gcm';
+
+  constructor(private readonly converter?: DiscConverter) {}
 
   async detect(filePath: string): Promise<DetectionResult> {
     const disc = classifyDisc(await readHead(filePath, GCM_HEADER_SIZE));
@@ -58,13 +61,24 @@ export class GcmAdapter implements InputAdapter {
     return [{ path: target, origin: `${path.basename(filePath)} :: boot.dol`, metadata }];
   }
 
-  private async readDisc(filePath: string): Promise<{ metadata: BinaryMetadata; data: Buffer }> {
+  private async readDisc(
+    filePath: string,
+    allowConversion = true,
+  ): Promise<{ metadata: BinaryMetadata; data: Buffer }> {
     const name = path.basename(filePath);
     const disc = classifyDisc(await readHead(filePath, GCM_HEADER_SIZE));
     if (disc.kind === 'compressed') {
-      throw new RecodeError('INVALID_INPUT', `${name} is a ${disc.format} container.`, {
-        hint: 'Convert it to a plain ISO first (Dolphin: right-click the game > Convert File).',
-      });
+      if (!this.converter || !allowConversion) {
+        throw new RecodeError('INVALID_INPUT', `${name} is a ${disc.format} container.`, {
+          hint: 'Convert it to a plain ISO first (Dolphin: right-click the game > Convert File).',
+        });
+      }
+      const converted = await this.converter.convertToIso(filePath);
+      try {
+        return await this.readDisc(converted.isoPath, false);
+      } finally {
+        await converted.dispose();
+      }
     }
     if (disc.kind === 'wii') {
       throw new RecodeError('INVALID_INPUT', `${name} is a Wii disc; Wii is not supported yet.`, {

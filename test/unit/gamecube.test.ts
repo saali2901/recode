@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { RecodeError } from '../../src/core/errors/index.js';
@@ -189,5 +190,69 @@ describe('Ghidra import plan', () => {
       '<language id="PowerPC:BE:32:default"/><language id="PowerPC:BE:32:Gekko_Broadway"/>',
     );
     expect(await findGekkoLanguage(root)).toBe('PowerPC:BE:32:Gekko_Broadway');
+  });
+});
+
+describe('compressed discs via Dolphin', () => {
+  const fakeTool = path.resolve('test/helpers/fake-dolphin-tool.mjs');
+
+  /** A launcher that runs the fake through Node, as an executable file of the current platform. */
+  async function launcher(): Promise<string> {
+    const dir = await makeTempDir();
+    if (process.platform === 'win32') {
+      const file = path.join(dir, 'dolphin-tool.cmd');
+      await fs.writeFile(file, `@echo off\r\n"${process.execPath}" "${fakeTool}" %*\r\n`);
+      return file;
+    }
+    const file = path.join(dir, 'dolphin-tool');
+    await fs.writeFile(file, `#!/bin/sh\nexec "${process.execPath}" "${fakeTool}" "$@"\n`);
+    await fs.chmod(file, 0o755);
+    return file;
+  }
+
+  async function rvz(): Promise<string> {
+    return write(
+      'game.rvz',
+      Buffer.concat([Buffer.from('RVZ\x01', 'latin1'), Buffer.alloc(0x500)]),
+    );
+  }
+
+  async function withConverter(
+    command: string | undefined,
+    env: Record<string, string>,
+  ): Promise<InputAdapter> {
+    const { DolphinToolConverter } = await import('../../src/infrastructure/tools/dolphin.js');
+    const reg = createDefaultRegistry(defaultConfig().archive, {
+      discConverter: new DolphinToolConverter(command, { ...process.env, ...env }),
+    });
+    return reg.get('gcm') as InputAdapter;
+  }
+
+  it('converts an RVZ to ISO, extracts the boot DOL and removes the temporary ISO', async () => {
+    const dol = buildDol();
+    const iso = await write('plain.iso', buildGcm(dol, { gameId: 'GZLE01' }));
+    const adapter = await withConverter(await launcher(), { FAKE_DOLPHIN_ISO: iso });
+    const [prepared] = await adapter.prepare(await rvz(), await makeTempDir());
+    expect(prepared && (await fs.readFile(prepared.path))).toEqual(dol);
+    expect(prepared?.metadata.game?.gameId).toBe('GZLE01');
+    const leftovers = (await fs.readdir(os.tmpdir())).filter((n) => n.startsWith('recode-disc-'));
+    expect(leftovers).toEqual([]);
+  });
+
+  it('explains how to get Dolphin when the tool is missing', async () => {
+    const adapter = await withConverter('definitely-not-installed-dolphin', {});
+    await expect(adapter.prepare(await rvz(), await makeTempDir())).rejects.toThrow(
+      /command-line tool/,
+    );
+  });
+
+  it('reports a failing conversion and a conversion without output', async () => {
+    const command = await launcher();
+    const failing = await withConverter(command, { FAKE_DOLPHIN_MODE: 'fail' });
+    await expect(failing.prepare(await rvz(), await makeTempDir())).rejects.toThrow(
+      /could not convert/,
+    );
+    const silent = await withConverter(command, { FAKE_DOLPHIN_MODE: 'noop' });
+    await expect(silent.prepare(await rvz(), await makeTempDir())).rejects.toThrow(/no ISO/);
   });
 });

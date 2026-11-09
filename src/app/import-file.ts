@@ -4,6 +4,7 @@ import type { Project } from '../core/project/project.js';
 import { WorkflowManager } from '../core/workflow/workflow.js';
 import type { RecodeConfig } from '../infrastructure/config/config.js';
 import { writeJsonAtomic } from '../infrastructure/filesystem/files.js';
+import { DolphinToolConverter } from '../infrastructure/tools/dolphin.js';
 import { createDefaultRegistry } from '../input/adapters/registry.js';
 import { ImportService, type ImportReport } from '../input/import-service.js';
 import type { DetectionResult, MetadataHints } from '../input/interfaces/types.js';
@@ -20,7 +21,12 @@ export function detectFile(
   project: Project,
   file: string,
 ): Promise<DetectionResult> {
-  return new ImportService(project, createDefaultRegistry(config.archive)).detect(file);
+  return new ImportService(
+    project,
+    createDefaultRegistry(config.archive, {
+      discConverter: new DolphinToolConverter(config.tools.dolphinToolCommand),
+    }),
+  ).detect(file);
 }
 
 /**
@@ -34,7 +40,12 @@ export async function importIntoProject(
   file: string,
   request: ImportRequest = {},
 ): Promise<ImportReport> {
-  const service = new ImportService(project, createDefaultRegistry(config.archive));
+  const service = new ImportService(
+    project,
+    createDefaultRegistry(config.archive, {
+      discConverter: new DolphinToolConverter(config.tools.dolphinToolCommand),
+    }),
+  );
   const report = await service.import(file, {
     ...(request.hints ? { hints: request.hints } : {}),
     ...(request.forceRaw ? { forceRaw: true } : {}),

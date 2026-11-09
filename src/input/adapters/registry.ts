@@ -1,4 +1,4 @@
-import type { DetectionResult, InputAdapter } from '../interfaces/types.js';
+import type { DetectionResult, DiscConverter, InputAdapter } from '../interfaces/types.js';
 import type { ArchiveLimits } from '../extractors/zip.js';
 import { CoffAdapter } from './coff-adapter.js';
 import { DolAdapter } from './dol-adapter.js';
@@ -66,14 +66,17 @@ export class AdapterRegistry {
   }
 }
 
-export function createDefaultRegistry(archiveLimits: ArchiveLimits): AdapterRegistry {
+export function createDefaultRegistry(
+  archiveLimits: ArchiveLimits,
+  options: { discConverter?: DiscConverter | undefined } = {},
+): AdapterRegistry {
   const registry = new AdapterRegistry();
   registry
     .register(new ElfAdapter())
     .register(new PeAdapter())
     .register(new MachOAdapter())
     .register(new CoffAdapter())
-    .register(new GcmAdapter())
+    .register(new GcmAdapter(options.discConverter))
     .register(new DolAdapter())
     .register(new RawBinaryAdapter());
   registry.register(new ZipAdapter(registry, archiveLimits));

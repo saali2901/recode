@@ -16,6 +16,8 @@ export const ConfigSchema = z
         ninjaCommand: z.string().min(1).default('ninja'),
         cCompiler: z.string().optional(),
         javaCommand: z.string().min(1).default('java'),
+        /** Dolphin's command-line tool; only needed for compressed GameCube discs (RVZ, WIA, ...). */
+        dolphinToolCommand: z.string().min(1).optional(),
       })
       .strict()
       .default({

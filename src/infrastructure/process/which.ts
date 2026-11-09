@@ -50,7 +50,11 @@ function candidatePaths(
 ): string[] {
   const extensions = platform === 'win32' ? (env['PATHEXT'] ?? '.EXE;.CMD;.BAT').split(';') : [''];
   if (command.includes('/') || command.includes('\\')) {
-    return extensions.map((ext) => command + ext);
+    // An explicit path that already names an executable (e.g. "...\DolphinTool.exe") is used as given.
+    const hasExtension = extensions.some(
+      (ext) => ext !== '' && command.toLowerCase().endsWith(ext.toLowerCase()),
+    );
+    return hasExtension ? [command] : extensions.map((ext) => command + ext);
   }
   const delimiter = platform === 'win32' ? ';' : path.delimiter;
   const join = platform === 'win32' ? path.win32.join : path.join;

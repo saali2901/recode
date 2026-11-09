@@ -91,8 +91,9 @@ two places: `decompiler/ghidra/import-plan.ts` (how Ghidra loads the file) and t
 **GameCube.** A DOL has no magic number, so `DolAdapter` accepts a file only if the whole header is consistent
 (section bounds, alignment, MEM1 range, no overlaps, entry inside a text section). `GcmAdapter` reads the disc header
 (game ID, title, region, boot DOL offset), copies the boot DOL into `input/` as `<gameId>-boot.dol` and records the game
-in the metadata. Compressed containers (RVZ, WIA, CISO, GCZ, WBFS) and Wii discs are recognized and rejected with a hint
-because decoding them needs a library ReCode does not ship; convert to ISO with Dolphin.
+in the metadata. Compressed containers (RVZ, WIA, CISO, GCZ, WBFS) are converted to a temporary ISO with Dolphin's `dolphin-tool`
+(found on PATH or via `tools.dolphinToolCommand`; the ISO is deleted right after the boot DOL was read). Without
+Dolphin they are rejected with a hint. Wii discs are recognized and rejected.
 
 Ghidra has no DOL loader. ReCode imports the file with `BinaryLoader` and runs `ImportDol.java` as `-preScript`: it
 removes the single block, creates one block per DOL section (text `r-x`, data `rw-`, `.bss` uninitialized) from the

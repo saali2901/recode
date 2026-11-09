@@ -123,6 +123,17 @@ export interface PreparedBinary {
   metadata: BinaryMetadata;
 }
 
+/** A converted copy of a disc image; `dispose` deletes the temporary files. */
+export interface ConvertedDisc {
+  isoPath: string;
+  dispose(): Promise<void>;
+}
+
+/** Turns compressed disc containers (RVZ, WIA, GCZ, CISO, ...) into a plain ISO using an external tool. */
+export interface DiscConverter {
+  convertToIso(source: string, signal?: AbortSignal): Promise<ConvertedDisc>;
+}
+
 /** Contract for every supported input format. */
 export interface InputAdapter {
   readonly id: string;
