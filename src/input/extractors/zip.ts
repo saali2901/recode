@@ -24,6 +24,8 @@ export interface ZipEntry {
   localHeaderOffset: number;
   isDirectory: boolean;
   isSymlink: boolean;
+  /** Unix permission bits from the archive (0 if the archive has none). */
+  mode: number;
   encrypted: boolean;
 }
 
@@ -100,6 +102,7 @@ export function readZipEntries(view: FileView, limits: ArchiveLimits): ZipEntry[
       localHeaderOffset: dir.readUInt32LE(offset + 42),
       isDirectory: name.endsWith('/'),
       isSymlink: (unixMode & 0o170000) === 0o120000,
+      mode: unixMode & 0o777,
       encrypted: (flags & 1) !== 0,
     });
     offset += 46 + nameLength + extraLength + commentLength;
@@ -174,7 +177,11 @@ export async function extractZip(
       await fs.mkdir(path.dirname(destination), { recursive: true });
       await assertNoSymlinkParents(realTarget, destination);
       try {
-        await fs.writeFile(destination, data, { flag: 'wx', mode: 0o644 });
+        // Only the executable bit is taken from the archive (never setuid/setgid or write bits).
+        await fs.writeFile(destination, data, {
+          flag: 'wx',
+          mode: entry.mode & 0o111 ? 0o755 : 0o644,
+        });
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
           throw archiveError(`Duplicate or conflicting archive entry: ${entry.name}`);
