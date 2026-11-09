@@ -34,6 +34,8 @@ export interface SetupDeps {
   hasSudo: boolean;
   confirm: (question: string) => Promise<boolean | undefined>;
   setConfig: (key: string, value: unknown) => Promise<void>;
+  /** Windows: re-reads PATH after installations so new tools are found without a new terminal. */
+  refreshPath?: () => Promise<void>;
   fetchImpl?: typeof fetch;
   releaseApi?: string;
   dryRun: boolean;
@@ -49,7 +51,8 @@ export function defaultDataDir(env: NodeJS.ProcessEnv = process.env): string {
 export async function detectPackageManager(
   platform: NodeJS.Platform,
 ): Promise<PackageManager | undefined> {
-  const candidates: PackageManager[] = platform === 'darwin' ? ['brew'] : ['apt', 'dnf', 'pacman'];
+  const candidates: PackageManager[] =
+    platform === 'darwin' ? ['brew'] : platform === 'win32' ? ['winget'] : ['apt', 'dnf', 'pacman'];
   for (const manager of candidates) {
     const binary = manager === 'apt' ? 'apt-get' : manager;
     if (await which(binary)) return manager;
@@ -140,7 +143,8 @@ export async function runSetup(deps: SetupDeps): Promise<SetupResult> {
   for (const step of plan.steps) {
     out.info(step.title);
     await executeStep(step, deps);
-    executed.push(step.id);
+    if (deps.platform === 'win32') await deps.refreshPath?.();
+    if (!executed.includes(step.id)) executed.push(step.id);
     out.success(`Done: ${step.id}`);
   }
 
@@ -207,7 +211,11 @@ async function executeStep(step: SetupStep, deps: SetupDeps): Promise<void> {
       hint: result.stderr.trim().split('\n').slice(-6).join('\n'),
     });
   }
-  const binary = path.join(prefix, 'bin', 'claude');
+  // npm puts the launcher into <prefix>/bin on Unix, but directly into <prefix> (as claude.cmd) on Windows.
+  const binary =
+    deps.platform === 'win32'
+      ? path.join(prefix, 'claude.cmd')
+      : path.join(prefix, 'bin', 'claude');
   await deps.setConfig('tools.claudeCommand', binary);
   deps.out.info(`Claude Code installed at ${binary}`);
 }

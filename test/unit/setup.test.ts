@@ -91,12 +91,6 @@ describe('setup plan', () => {
     expect(noSudo.manual[0]).toContain('build-essential cmake ninja-build openjdk-21-jdk');
   });
 
-  it('sends Windows users to WSL2 instead of pretending to support native installs', () => {
-    const plan = planSetup(input({ platform: 'win32', packageManager: undefined }));
-    expect(plan.steps).toEqual([]);
-    expect(plan.manual[0]).toContain('wsl --install');
-  });
-
   it('plans nothing when nothing is missing', () => {
     expect(planSetup(input({ missing: new Set() }))).toEqual({ steps: [], manual: [] });
   });
@@ -430,12 +424,5 @@ describe('runSetup', () => {
         path.join(h.deps.dataDir, 'ghidra', 'ghidra_99.0_PUBLIC', 'support', 'analyzeHeadless'),
       ),
     ).resolves.toBeTruthy();
-  });
-
-  it('explains manual steps and stops when automatic installation is impossible', async () => {
-    const h = await harness({ platform: 'win32', yes: true }, [withMissing('cmake')]);
-    const result = await runSetup(h.deps);
-    expect(result.executed).toEqual([]);
-    expect(h.messages.join('\n')).toContain('wsl --install');
   });
 });

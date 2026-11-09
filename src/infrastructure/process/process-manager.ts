@@ -3,6 +3,7 @@ import { createWriteStream } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { RecodeError } from '../../core/errors/index.js';
+import { prepareSpawn } from './windows-command.js';
 
 export interface RunOptions {
   command: string;
@@ -101,6 +102,7 @@ function killTree(child: ChildProcess, signal: NodeJS.Signals): void {
  */
 export async function runProcess(options: RunOptions): Promise<RunResult> {
   const started = Date.now();
+  const target = await prepareSpawn(options.command, options.args, options.env ?? process.env);
   const limit = options.maxCaptureBytes ?? 4 * 1024 * 1024;
   const stdout = new BoundedBuffer(limit);
   const stderr = new BoundedBuffer(limit);
@@ -128,7 +130,8 @@ export async function runProcess(options: RunOptions): Promise<RunResult> {
       return;
     }
 
-    const child = spawn(options.command, [...options.args], {
+    const child = spawn(target.command, target.args, {
+      windowsVerbatimArguments: target.windowsVerbatimArguments,
       cwd: options.cwd,
       env: options.env ?? process.env,
       shell: false,

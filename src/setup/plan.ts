@@ -1,6 +1,6 @@
 import type { ToolId } from '../infrastructure/tools/doctor.js';
 
-export type PackageManager = 'apt' | 'dnf' | 'pacman' | 'brew';
+export type PackageManager = 'apt' | 'dnf' | 'pacman' | 'brew' | 'winget';
 
 export interface CommandSpec {
   command: string;
@@ -38,13 +38,42 @@ const PACKAGES: Record<PackageManager, PackageSet> = {
   dnf: { build: ['gcc', 'cmake', 'ninja-build'], java: ['java-21-openjdk-devel'] },
   pacman: { build: ['base-devel', 'cmake', 'ninja'], java: ['jdk21-openjdk'] },
   brew: { build: ['cmake', 'ninja'], java: ['openjdk@21'] },
+  winget: {
+    build: ['Kitware.CMake', 'Ninja-build.Ninja', 'BrechtSanders.WinLibs.POSIX.UCRT'],
+    java: ['Microsoft.OpenJDK.21'],
+  },
 };
+
+/** winget packages per missing tool (each tool maps to exactly one package). */
+const WINGET_BY_TOOL: Partial<Record<ToolId, string>> = {
+  cmake: 'Kitware.CMake',
+  ninja: 'Ninja-build.Ninja',
+  compiler: 'BrechtSanders.WinLibs.POSIX.UCRT',
+  java: 'Microsoft.OpenJDK.21',
+};
+
+export function wingetInstall(id: string): CommandSpec {
+  return {
+    command: 'winget',
+    args: [
+      'install',
+      '--id',
+      id,
+      '-e',
+      '--silent',
+      '--disable-interactivity',
+      '--accept-package-agreements',
+      '--accept-source-agreements',
+    ],
+  };
+}
 
 const INSTALL_ARGS: Record<PackageManager, string[]> = {
   apt: ['apt-get', 'install', '-y'],
   dnf: ['dnf', 'install', '-y'],
   pacman: ['pacman', '-S', '--needed', '--noconfirm'],
   brew: ['brew', 'install'],
+  winget: [],
 };
 
 function installCommand(
@@ -69,22 +98,33 @@ export function planSetup(input: PlanInput): SetupPlan {
   const manual: string[] = [];
   const { missing } = input;
 
-  if (input.platform === 'win32') {
-    return {
-      steps: [],
-      manual: [
-        'ReCode is supported on Linux and macOS. On Windows use WSL2: run "wsl --install -d Ubuntu" in PowerShell, ' +
-          'then run the ReCode installer inside Ubuntu (see README).',
-      ],
-    };
-  }
-
   const wantsBuild = ['compiler', 'cmake', 'ninja'].some((t) => missing.has(t as ToolId));
   const wantsJava = missing.has('java');
 
   if (wantsBuild || wantsJava) {
     const manager = input.packageManager;
-    if (!manager) {
+    if (input.platform === 'win32') {
+      if (manager !== 'winget') {
+        manual.push(
+          'winget (Windows Package Manager) was not found. Install "App Installer" from the Microsoft Store, or install CMake, Ninja, a JDK 21 and MinGW-w64 (gcc) yourself.',
+        );
+      } else {
+        for (const tool of ['cmake', 'ninja', 'compiler', 'java'] as const) {
+          const id = WINGET_BY_TOOL[tool];
+          if (!missing.has(tool) || !id) continue;
+          steps.push({
+            kind: 'command',
+            id: 'packages',
+            title: `Install ${id} with winget`,
+            spec: wingetInstall(id),
+            admin: false,
+          });
+        }
+        manual.push(
+          'Windows may ask for administrator confirmation (UAC) during the installation.',
+        );
+      }
+    } else if (!manager) {
       manual.push(
         'No supported package manager found (apt, dnf, pacman, Homebrew). Install a C compiler, CMake, Ninja and a JDK 21+ yourself.',
       );
