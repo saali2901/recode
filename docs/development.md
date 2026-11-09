@@ -71,3 +71,14 @@ compatible with the real tools whenever you change an invocation.
 `src/decompiler/scripts/ExportAnalysis.java` is compiled by Ghidra at run time (Java, Ghidra API only). After a change,
 run `npm run test:ghidra` against a real installation, and keep the JSON in sync with
 `src/decompiler/interfaces/schemas.ts` and `test/helpers/fake-ghidra.mjs`.
+
+## Keeping documentation current
+
+The project skill (`.claude/skills/recode-maintainer/SKILL.md`) is the maintainer's handbook: workflow, project map, commands,
+decisions, known gaps and a change log. Update it in every change, and the README when installation, start, commands or
+supported files change (the README stays short and has no CLI usage). Enforcement:
+
+- `test/unit/docs-sync.test.ts` (part of `npm test`) compares the skill and README with the real CLI commands, input adapters
+  and `src/` directories.
+- `scripts/skill-guard.mjs` is a Claude Code Stop hook (`.claude/settings.json`) and a git pre-commit check
+  (`npm run hooks` enables `.githooks`). `SKIP_SKILL_GUARD=1` bypasses it once.

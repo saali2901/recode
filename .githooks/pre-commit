@@ -1,0 +1,3 @@
+#!/bin/sh
+# Enable with: git config core.hooksPath .githooks   (or: npm run hooks)
+exec node scripts/skill-guard.mjs --staged
