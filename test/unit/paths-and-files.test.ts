@@ -1,9 +1,10 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import {
   readJson,
+  renameWithRetry,
   writeFileAtomic,
   writeJsonAtomic,
   copyUnique,
@@ -17,6 +18,44 @@ import {
 import { makeTempDir, registerTempCleanup } from '../helpers/tmp.js';
 
 registerTempCleanup();
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+});
+
+describe('renameWithRetry', () => {
+  const errno = (code: string): NodeJS.ErrnoException => Object.assign(new Error(code), { code });
+
+  it('survives a target that is briefly locked (Windows EPERM)', async () => {
+    const dir = await makeTempDir();
+    const target = path.join(dir, 'state.json');
+    await fs.writeFile(target, 'old');
+    await writeFileAtomic(target, 'seed');
+    const real = fs.rename.bind(fs);
+    let failures = 2;
+    vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+      if (failures-- > 0) throw errno('EPERM');
+      return real(from, to);
+    });
+    await writeFileAtomic(target, 'new');
+    expect(await fs.readFile(target, 'utf8')).toBe('new');
+    expect(failures).toBeLessThan(0);
+  });
+
+  it('gives up after repeated failures and does not retry other errors', async () => {
+    vi.useFakeTimers();
+    const spy = vi.spyOn(fs, 'rename').mockRejectedValue(errno('EPERM'));
+    const failing = renameWithRetry('a', 'b');
+    const assertion = expect(failing).rejects.toMatchObject({ code: 'EPERM' });
+    await vi.advanceTimersByTimeAsync(10_000);
+    await assertion;
+    expect(spy).toHaveBeenCalledTimes(8);
+
+    spy.mockReset().mockRejectedValue(errno('ENOENT'));
+    await expect(renameWithRetry('a', 'b')).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe('path validation', () => {
   it('keeps joined paths inside the root', () => {

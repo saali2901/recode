@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { RecodeError } from '../../core/errors/index.js';
 import { assetPath } from '../../infrastructure/filesystem/assets.js';
-import { pathExists } from '../../infrastructure/filesystem/files.js';
+import { pathExists, renameWithRetry } from '../../infrastructure/filesystem/files.js';
 import { runProcess, succeeded } from '../../infrastructure/process/process-manager.js';
 import { validateAnalysisDirectory } from '../extraction/analysis-files.js';
 import type { DecompileRequest, DecompileSummary, Decompiler } from '../interfaces/decompiler.js';
@@ -166,11 +166,11 @@ export async function createProjectDirectory(request: DecompileRequest): Promise
 async function swapDirectory(staging: string, target: string): Promise<void> {
   const backup = `${target}.old-${process.pid}`;
   const hadTarget = await pathExists(target);
-  if (hadTarget) await fs.rename(target, backup);
+  if (hadTarget) await renameWithRetry(target, backup);
   try {
-    await fs.rename(staging, target);
+    await renameWithRetry(staging, target);
   } catch (error) {
-    if (hadTarget) await fs.rename(backup, target);
+    if (hadTarget) await renameWithRetry(backup, target);
     throw error;
   }
   if (hadTarget) await fs.rm(backup, { recursive: true, force: true });

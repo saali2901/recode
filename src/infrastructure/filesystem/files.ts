@@ -5,6 +5,27 @@ import path from 'node:path';
 import type { ZodType } from 'zod';
 import { RecodeError } from '../../core/errors/index.js';
 
+const TRANSIENT_RENAME_ERRORS = new Set(['EPERM', 'EBUSY', 'EACCES']);
+const RENAME_ATTEMPTS = 8;
+
+/**
+ * Renames over an existing file. On Windows this fails transiently (EPERM/EBUSY/EACCES) while another process
+ * (virus scanner, indexer) or a concurrent reader briefly holds the target open, so it is retried with a short
+ * backoff before the error is reported.
+ */
+export async function renameWithRetry(from: string, to: string): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await fs.rename(from, to);
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code ?? '';
+      if (!TRANSIENT_RENAME_ERRORS.has(code) || attempt >= RENAME_ATTEMPTS) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 20 * 2 ** (attempt - 1)));
+    }
+  }
+}
+
 /** Writes a file atomically: temp file in the same directory, fsync, rename. */
 export async function writeFileAtomic(filePath: string, data: string | Uint8Array): Promise<void> {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
@@ -17,7 +38,7 @@ export async function writeFileAtomic(filePath: string, data: string | Uint8Arra
     await handle.close();
   }
   try {
-    await fs.rename(tmp, filePath);
+    await renameWithRetry(tmp, filePath);
   } catch (error) {
     await fs.rm(tmp, { force: true });
     throw error;

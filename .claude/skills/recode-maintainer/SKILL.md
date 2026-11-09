@@ -108,6 +108,7 @@ Enforcement: the Stop hook in `.claude/settings.json` and the pre-commit hook (`
 
 ## Change log (newest first)
 
+- 2026-11-09 - Fix: atomic writes retry `rename` on transient Windows errors (EPERM/EBUSY/EACCES) via `renameWithRetry`; a reconstruction run died with EPERM on the task file.
 - 2026-11-09 - r2/r13 small-data anchors: `ppc-startup.ts` finds them, `BinaryMetadata.initialRegisters` stores them, `ImportDol.java` fixes the registers in all code blocks (`reg:` arguments). Real Ghidra 12.2: `unaff_r13` accesses dropped from 69 functions to 0, now shown as globals.
 - 2026-11-09 - Fix: Ghidra splits script arguments at commas, so `ImportDol.java` section descriptions use `:`; the fake Ghidra now rejects commas; `ExportAnalysis.java` fails loudly when the entry point is not in memory (was: silent empty analysis). Verified with real Ghidra 12.2.
 - 2026-11-09 - `recode doctor` reports the optional Dolphin tool (warning only).
