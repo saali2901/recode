@@ -70,6 +70,7 @@ export function wingetInstall(id: string): CommandSpec {
       '--accept-package-agreements',
       '--accept-source-agreements',
     ],
+    okExitCodes: WINGET_ALREADY_INSTALLED,
   };
 }
 

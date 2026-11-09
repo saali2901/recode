@@ -90,6 +90,8 @@ export interface SetupResult {
 /** Installs what `recode doctor` finds missing. Everything user-visible goes through `deps.out`. */
 export async function runSetup(deps: SetupDeps): Promise<SetupResult> {
   const { out } = deps;
+  // Tools installed earlier (e.g. by a previous run) may not be in this terminal's PATH yet.
+  if (deps.platform === 'win32') await deps.refreshPath?.();
   const before = await deps.checks();
   const missing = missingTools(before);
   const authMissing = before.some((c) => c.id === 'claude-auth' && c.status === 'fail');
@@ -170,7 +172,9 @@ export async function runSetup(deps: SetupDeps): Promise<SetupResult> {
 async function executeStep(step: SetupStep, deps: SetupDeps): Promise<void> {
   if (step.kind === 'command') {
     const result = await deps.run(step.spec);
-    if (!succeeded(result)) {
+    const alreadyFine =
+      result.exitCode !== null && (step.spec.okExitCodes ?? []).includes(result.exitCode);
+    if (!succeeded(result) && !alreadyFine) {
       throw new RecodeError(
         'TOOL_FAILED',
         `"${step.spec.command}" failed with exit code ${result.exitCode}.`,
