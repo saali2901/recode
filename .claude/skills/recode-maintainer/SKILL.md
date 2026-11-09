@@ -94,7 +94,7 @@ Enforcement: the Stop hook in `.claude/settings.json` and the pre-commit hook (`
 
 ## Known gaps (keep honest)
 
-- GameCube: `ImportDol.java` and the Gekko language choice were never run against a real Ghidra (only against the command-line-compatible fake); only the boot DOL of a disc is extracted (no `.rel` modules, no other disc files); no r2/r13 small-data register setup; no SDK function signatures (names are guesses by the agents); the `dolphin-tool convert` command line was never run against a real Dolphin (only a fake); the temp ISO needs ~1.4 GB free space; Wii/MEM2 unsupported; `recode doctor` does not check for Dolphin.
+- GameCube: `ImportDol.java` and the Gekko language choice were never run against a real Ghidra (only against the command-line-compatible fake); only the boot DOL of a disc is extracted (no `.rel` modules, no other disc files); no r2/r13 small-data register setup; no SDK function signatures (names are guesses by the agents); the `dolphin-tool convert` command line was never run against a real Dolphin (only a fake); the temp ISO needs ~1.4 GB free space; Wii/MEM2 unsupported; `recode doctor` only warns (never fails) when Dolphin is missing.
 - ELF-based tests need a Linux `gcc` fixture (`test/fixtures/build/sample-x86_64`); on native Windows they fail for that reason, not because of the code.
 - Native Windows (winget, `.cmd` launching, Claude permission rules with `C:/` paths) is only partly verified by the owner's manual runs; Ghidra 12.2 import worked, `ExportAnalysis.java` was not confirmed against real Ghidra output yet unless noted in the change log.
 - No functional-equivalence or fidelity check (reported `not-assessed`).
@@ -108,6 +108,7 @@ Enforcement: the Stop hook in `.claude/settings.json` and the pre-commit hook (`
 
 ## Change log (newest first)
 
+- 2026-11-09 - `recode doctor` reports the optional Dolphin tool (warning only).
 - 2026-11-09 - Compressed GameCube discs (RVZ/WIA/GCZ/CISO) via `dolphin-tool`; `which` accepts explicit paths that already carry an executable extension.
 - 2026-11-09 - GameCube support: DOL + ISO adapters (`parsers/dol.ts`, `parsers/gcm.ts`), `platform`/`game` metadata, Ghidra import plan with `ImportDol.java` and Gekko language lookup, platform notes for agents (`templates/platforms/gamecube.md`), tests with synthetic DOL/ISO builders.
 - 2026-11-09 - Added this skill, `scripts/skill-guard.mjs` (Stop hook + pre-commit), `test/unit/docs-sync.test.ts`; README reduced to Installation/Start/Commands/Supported files.

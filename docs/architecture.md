@@ -93,7 +93,7 @@ two places: `decompiler/ghidra/import-plan.ts` (how Ghidra loads the file) and t
 (game ID, title, region, boot DOL offset), copies the boot DOL into `input/` as `<gameId>-boot.dol` and records the game
 in the metadata. Compressed containers (RVZ, WIA, CISO, GCZ, WBFS) are converted to a temporary ISO with Dolphin's `dolphin-tool`
 (found on PATH or via `tools.dolphinToolCommand`; the ISO is deleted right after the boot DOL was read). Without
-Dolphin they are rejected with a hint. Wii discs are recognized and rejected.
+Dolphin they are rejected with a hint; `recode doctor` shows the tool as an optional check. Wii discs are recognized and rejected.
 
 Ghidra has no DOL loader. ReCode imports the file with `BinaryLoader` and runs `ImportDol.java` as `-preScript`: it
 removes the single block, creates one block per DOL section (text `r-x`, data `rw-`, `.bss` uninitialized) from the

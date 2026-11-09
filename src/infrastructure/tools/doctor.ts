@@ -3,11 +3,20 @@ import { findGhidra } from '../../decompiler/ghidra/locate.js';
 import type { RecodeConfig } from '../config/config.js';
 import { runProcess, succeeded } from '../process/process-manager.js';
 import { which } from '../process/which.js';
+import { DolphinToolConverter } from './dolphin.js';
 
 export type CheckStatus = 'ok' | 'warn' | 'fail';
 
 export type ToolId =
-  'node' | 'claude' | 'claude-auth' | 'ghidra' | 'java' | 'compiler' | 'cmake' | 'ninja';
+  | 'node'
+  | 'claude'
+  | 'claude-auth'
+  | 'ghidra'
+  | 'java'
+  | 'compiler'
+  | 'cmake'
+  | 'ninja'
+  | 'dolphin';
 
 export interface CheckResult {
   id: ToolId;
@@ -197,6 +206,21 @@ async function checkSimple(
   return { id, label, status: 'ok', detail: version ?? 'found' };
 }
 
+/** Optional: only compressed GameCube discs (RVZ, WIA, GCZ, CISO) need it, so a missing tool is a warning. */
+async function checkDolphin(config: RecodeConfig): Promise<CheckResult> {
+  const found = await new DolphinToolConverter(config.tools.dolphinToolCommand).locate();
+  if (!found) {
+    return {
+      id: 'dolphin',
+      label: 'Dolphin tool (optional)',
+      status: 'warn',
+      detail: 'not found',
+      hint: 'Only needed for compressed GameCube discs (RVZ, WIA, GCZ, CISO). Install Dolphin and put dolphin-tool on PATH, or run "recode config set tools.dolphinToolCommand <path>".',
+    };
+  }
+  return { id: 'dolphin', label: 'Dolphin tool (optional)', status: 'ok', detail: found };
+}
+
 /** Runs the requested checks (all by default). Never throws. */
 export async function runChecks(
   config: RecodeConfig,
@@ -229,6 +253,7 @@ export async function runChecks(
           'Run "recode setup" or install Ninja (e.g. apt install ninja-build).',
         ),
     ],
+    ['dolphin', () => checkDolphin(config)],
   ];
   const selected = all.filter(([id]) => !only || only.includes(id));
   return Promise.all(selected.map(([, run]) => run()));
