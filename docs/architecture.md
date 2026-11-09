@@ -141,6 +141,6 @@ files (headers, CMake) and cannot conflict.
   reconstructed and is opt-in (`EXCLUDE_FROM_ALL`), because partial reconstructions rarely link.
 - The interactive prompt for raw-binary metadata works on terminals only; otherwise use the options.
 - Large binaries: all functions get tasks (up to `ghidra.maxFunctions`); cost and duration scale with function count.
-- Windows is untested; `.bat`/`.cmd` launchers (Ghidra, `claude.cmd`) cannot be started without a shell.
+- Windows support is new and untested on real Windows: `.bat`/`.cmd` launchers (Ghidra, `claude.cmd`) are started through `cmd.exe /d /s /c` with strict argument quoting (arguments containing `"` or `%` are rejected); Claude's permission rules with Windows paths are unverified.
 - Interrupt handling: Ctrl+C stops child processes and keeps all state; a hard kill of ReCode may leave an orphaned
   child process (the next run recovers state but does not kill it).

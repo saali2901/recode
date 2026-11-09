@@ -43,7 +43,7 @@ One command installs ReCode **and everything it needs** (Node.js, JDK 21, C comp
 curl -fsSL https://raw.githubusercontent.com/saali2901/recode/main/install.sh | bash
 ```
 
-**Windows** (PowerShell) – ReCode runs inside WSL2/Ubuntu, the script sets it up:
+**Windows** (PowerShell, native – no WSL needed; uses `winget`, Windows 10 1809+ / 11):
 
 ```powershell
 irm https://raw.githubusercontent.com/saali2901/recode/main/install.ps1 | iex
@@ -52,7 +52,7 @@ irm https://raw.githubusercontent.com/saali2901/recode/main/install.ps1 | iex
 The installer shows what it is going to do and asks once before changing anything (`-y` skips the question,
 `--dry-run` only prints the plan). It does not need a pre-installed Node.js: if yours is missing or too old, it downloads the
 official Node.js build and verifies its SHA-256. System packages (JDK, compiler, CMake, Ninja) are installed with
-`apt`, `dnf`, `pacman` or Homebrew, which asks for your password via `sudo` when required. Ghidra is downloaded from the
+`apt`, `dnf`, `pacman`, Homebrew or (Windows) `winget`; `sudo` asks for your password when required, Windows may show UAC prompts. On Windows the C compiler is MinGW-w64 (gcc). Ghidra is downloaded from the
 official GitHub release and verified against its published SHA-256; Claude Code is installed into ReCode's own folder.
 A download that fails its checksum is deleted and nothing is installed from it.
 
@@ -172,7 +172,7 @@ See [docs/architecture.md](docs/architecture.md#limitations) for the full list. 
   default test suite uses a mock CLI so it never needs a subscription.
 - Functional equivalence and fidelity cannot be verified in this version (reported as _not assessed_).
 - The subagent concurrency limit is given to the lead agent as an instruction; Claude Code has no hard cap for it.
-- Windows runs through WSL2; `install.ps1` has not been tested on a real Windows machine. The installers were tested on Linux only, and the Ghidra download step against a local stand-in for GitHub, not the real release.
+- Native Windows support (`install.ps1`, winget, running `.cmd` launchers via `cmd.exe`) has not been tested on a real Windows machine yet; WSL2 is available as an alternative (`$env:RECODE_WSL=1` before running `install.ps1`). The installers were tested on Linux only, and the Ghidra download step against a local stand-in for GitHub, not the real release.
 
 ## License
 

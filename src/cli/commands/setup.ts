@@ -8,6 +8,11 @@ import {
 import { runProcess } from '../../infrastructure/process/process-manager.js';
 import { which } from '../../infrastructure/process/which.js';
 import { runChecks } from '../../infrastructure/tools/doctor.js';
+import {
+  mergeWindowsPath,
+  parseRegistryPaths,
+  READ_PATH_SCRIPT,
+} from '../../setup/windows-path.js';
 import { defaultDataDir, detectPackageManager, runSetup } from '../../setup/setup.js';
 import type { Runtime } from '../runtime.js';
 
@@ -39,6 +44,17 @@ export function registerSetup(program: Command, runtime: Runtime): void {
         detectPackageManager: () => detectPackageManager(platform),
         isRoot: typeof process.getuid === 'function' && process.getuid() === 0,
         hasSudo: (await which('sudo')) !== undefined,
+        refreshPath: async () => {
+          if (platform !== 'win32') return;
+          const result = await runProcess({
+            command: 'powershell.exe',
+            args: ['-NoProfile', '-NonInteractive', '-Command', READ_PATH_SCRIPT],
+            timeoutMs: 20_000,
+          });
+          const { machine, user } = parseRegistryPaths(result.stdout);
+          if (machine || user)
+            process.env['PATH'] = mergeWindowsPath(machine, user, process.env['PATH'] ?? '');
+        },
         confirm: async (question) => {
           const answer = await runtime.prompt(question);
           return answer === undefined ? undefined : /^y(es)?$/i.test(answer);
