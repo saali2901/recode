@@ -1,4 +1,5 @@
 import type { Command } from 'commander';
+import { ExitCode } from '../../core/errors/index.js';
 import { Project } from '../../core/project/project.js';
 import {
   loadConfig,
@@ -27,7 +28,7 @@ export function registerSetup(program: Command, runtime: Runtime): void {
       const project = await Project.resolve(undefined, runtime.cwd).catch(() => undefined);
       const config = await loadConfig({ projectLayer: project?.configLayer ?? {} });
       const platform = process.platform;
-      await runSetup({
+      const result = await runSetup({
         platform,
         config,
         out: runtime.out,
@@ -64,5 +65,6 @@ export function registerSetup(program: Command, runtime: Runtime): void {
         yes: options.yes === true,
         ...(options.only ? { only: options.only.split(',').map((s) => s.trim()) } : {}),
       });
+      if (result.incomplete) process.exitCode = ExitCode.Prerequisite;
     });
 }
