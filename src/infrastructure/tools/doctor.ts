@@ -56,7 +56,7 @@ async function checkClaude(config: RecodeConfig): Promise<CheckResult> {
     return missing(
       'claude',
       'Claude Code CLI',
-      'Install it: npm install -g @anthropic-ai/claude-code (see docs/installation.md).',
+      'Run "recode setup" (or: npm install -g @anthropic-ai/claude-code).',
     );
   }
   const version = await versionOf(command, ['--version']);
@@ -131,14 +131,18 @@ async function checkGhidra(config: RecodeConfig): Promise<CheckResult> {
     : missing(
         'ghidra',
         'Ghidra',
-        'Install Ghidra and set GHIDRA_INSTALL_DIR (see docs/installation.md).',
+        'Run "recode setup" to download Ghidra, or set GHIDRA_INSTALL_DIR to an existing installation.',
       );
 }
 
 async function checkJava(config: RecodeConfig): Promise<CheckResult> {
   const command = config.tools.javaCommand;
   if (!(await which(command))) {
-    return missing('java', 'Java (JDK 21+ for Ghidra)', 'Install a JDK 21 or newer.');
+    return missing(
+      'java',
+      'Java (JDK 21+ for Ghidra)',
+      'Run "recode setup" or install a JDK 21 or newer.',
+    );
   }
   const result = await runProcess({ command, args: ['-version'], timeoutMs: 15_000 }).catch(
     () => undefined,
@@ -179,7 +183,7 @@ async function checkCompiler(config: RecodeConfig): Promise<CheckResult> {
       };
     }
   }
-  return missing('compiler', 'C compiler', 'Install gcc or clang (Windows: MSVC Build Tools).');
+  return missing('compiler', 'C compiler', 'Run "recode setup" or install gcc or clang.');
 }
 
 async function checkSimple(
@@ -207,7 +211,13 @@ export async function runChecks(
     ['compiler', () => checkCompiler(config)],
     [
       'cmake',
-      () => checkSimple('cmake', config.tools.cmakeCommand, 'CMake', 'Install CMake 3.16+.'),
+      () =>
+        checkSimple(
+          'cmake',
+          config.tools.cmakeCommand,
+          'CMake',
+          'Run "recode setup" or install CMake 3.16+.',
+        ),
     ],
     [
       'ninja',
@@ -216,7 +226,7 @@ export async function runChecks(
           'ninja',
           config.tools.ninjaCommand,
           'Ninja',
-          'Install Ninja (e.g. apt install ninja-build).',
+          'Run "recode setup" or install Ninja (e.g. apt install ninja-build).',
         ),
     ],
   ];
