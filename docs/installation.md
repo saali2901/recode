@@ -1,4 +1,7 @@
-# Installation
+# Manual installation
+
+Most users only need the one-line installer from the [README](../README.md). These are the manual steps, e.g. for
+unsupported systems.
 
 ## Node.js
 

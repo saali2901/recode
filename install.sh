@@ -58,7 +58,7 @@ main() {
   # ask "question" -> 0 if yes. Reads from the terminal so it also works with "curl | bash".
   ask() {
     [ "$YES" = 1 ] && return 0
-    if [ -r /dev/tty ] && [ -w /dev/tty ]; then
+    if ( : </dev/tty ) 2>/dev/null; then
       local answer
       printf '%s [y/N] ' "$1" >/dev/tty
       read -r answer </dev/tty || answer=""
@@ -112,7 +112,6 @@ main() {
     local base="https://nodejs.org/dist/latest-v${NODE_MAJOR}.x"
     local sums file expected tmp
     tmp="$(mktemp -d)"
-    trap 'rm -rf "$tmp"' EXIT
     if [ "$DRY" = 1 ]; then
       echo "   [dry-run] would download $base/SHASUMS256.txt and node-v${NODE_MAJOR}.*-$OS-$ARCH.tar.gz"
     else
@@ -127,6 +126,7 @@ main() {
       NODE_BIN="$NODE_DIR/bin/node"
       PRIVATE_NODE=1
       say "Installed Node.js $("$NODE_BIN" -v) at $NODE_DIR"
+      rm -rf "$tmp"
     fi
   fi
   [ "$DRY" = 1 ] && [ -z "$NODE_BIN" ] && NODE_BIN="$NODE_DIR/bin/node" && PRIVATE_NODE=1

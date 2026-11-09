@@ -33,39 +33,62 @@ directory.
 - Optional **AI review** (validation agent) and a validation report that distinguishes syntax, compilation,
   coverage, functional equivalence and fidelity (the last two are reported as _not assessed_ in this version).
 
-## Requirements
+## Install
 
-| Tool                                      | Needed for                          |
-| ----------------------------------------- | ----------------------------------- |
-| Node.js ≥ 20 (LTS recommended), npm       | running ReCode                      |
-| Ghidra (recent release) and a JDK ≥ 21    | `recode analyze`                    |
-| Claude Code CLI, logged in with your plan | `recode reconstruct`, `--ai-review` |
-| C compiler (gcc/clang), CMake, Ninja      | `recode build`                      |
+One command installs ReCode **and everything it needs** (Node.js, JDK 21, C compiler, CMake, Ninja, Ghidra, Claude Code).
 
-Run `recode doctor` to check them. Details: [docs/installation.md](docs/installation.md). Linux and macOS are the
-supported platforms; Windows is untested (see limitations).
-
-## Installation
+**Linux / macOS**
 
 ```bash
-git clone <this repository> recode && cd recode
-npm install
-npm run build
-npm link            # makes the "recode" command available
-recode doctor
+curl -fsSL https://raw.githubusercontent.com/saali2901/recode/main/install.sh | bash
 ```
+
+**Windows** (PowerShell) – ReCode runs inside WSL2/Ubuntu, the script sets it up:
+
+```powershell
+irm https://raw.githubusercontent.com/saali2901/recode/main/install.ps1 | iex
+```
+
+The installer shows what it is going to do and asks once before changing anything (`-y` skips the question,
+`--dry-run` only prints the plan). It does not need a pre-installed Node.js: if yours is missing or too old, it downloads the
+official Node.js build and verifies its SHA-256. System packages (JDK, compiler, CMake, Ninja) are installed with
+`apt`, `dnf`, `pacman` or Homebrew, which asks for your password via `sudo` when required. Ghidra is downloaded from the
+official GitHub release and verified against its published SHA-256; Claude Code is installed into ReCode's own folder.
+A download that fails its checksum is deleted and nothing is installed from it.
+
+Everything lives in `~/.local/share/recode` (program, Node.js, Ghidra, Claude Code), the command in `~/.local/bin/recode`,
+settings in `~/.config/recode`. To uninstall, delete these three. If `~/.local/bin` is not in your `PATH`, the installer
+prints the one line to add.
+
+**One thing no installer can do for you:** log in to Claude Code once with your own subscription:
+
+```bash
+claude        # sign in, then exit
+recode doctor # every line should show ✓
+```
+
+Already have some tools? `recode setup` installs only what `recode doctor` reports as missing
+(`recode setup --dry-run` shows the plan). Want to read the script first? Download it, read it, then run it:
+`curl -fsSL <url>/install.sh -o install.sh && less install.sh && bash install.sh`. Manual installation steps:
+[docs/installation.md](docs/installation.md).
 
 ## Quick start
 
 ```bash
+recode ui --open               # web interface: create a project, drop in a binary, follow the wizard
+```
+
+or on the command line:
+
+```bash
 recode init demo && cd demo
-recode import ../sample-program          # or a ZIP, PE, Mach-O, .bin (see below)
+recode import ../sample-program          # ELF, PE, Mach-O, ZIP, raw .bin ...
 recode inspect                           # facts from the file headers
 recode run                               # analyze → reconstruct → build → validate
 recode status
 ```
 
-Or step by step, re-running any step at will (finished steps with unchanged inputs are skipped; use `--force`):
+Every step can be re-run on its own; finished steps with unchanged inputs are skipped (`--force` overrides):
 
 ```bash
 recode analyze
@@ -149,7 +172,7 @@ See [docs/architecture.md](docs/architecture.md#limitations) for the full list. 
   default test suite uses a mock CLI so it never needs a subscription.
 - Functional equivalence and fidelity cannot be verified in this version (reported as _not assessed_).
 - The subagent concurrency limit is given to the lead agent as an instruction; Claude Code has no hard cap for it.
-- Windows is untested.
+- Windows runs through WSL2; `install.ps1` has not been tested on a real Windows machine. The installers were tested on Linux only, and the Ghidra download step against a local stand-in for GitHub, not the real release.
 
 ## License
 
