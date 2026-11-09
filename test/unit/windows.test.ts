@@ -172,3 +172,57 @@ describe('which() on Windows', () => {
     );
   });
 });
+
+describe('winget "already installed" results', () => {
+  it('are accepted as success, other failures are not', async () => {
+    const { runSetup } = await import('../../src/setup/setup.js');
+    const { defaultConfig } = await import('../../src/infrastructure/config/config.js');
+    const mk = async (exitCode: number) => {
+      const calls: string[] = [];
+      const refreshed: number[] = [];
+      const checks = [
+        { id: 'cmake' as const, label: 'cmake', status: 'fail' as const, detail: '' },
+      ];
+      const run = runSetup({
+        platform: 'win32',
+        config: defaultConfig(),
+        out: {
+          line: () => undefined,
+          info: () => undefined,
+          success: () => undefined,
+          warn: () => undefined,
+        },
+        dataDir: '/tmp/x',
+        checks: async () => {
+          calls.push('checks');
+          return checks;
+        },
+        refreshPath: async () => void refreshed.push(calls.length),
+        run: async () => ({
+          exitCode,
+          signal: null,
+          timedOut: false,
+          aborted: false,
+          durationMs: 1,
+          stdout: '',
+          stderr: '',
+          truncated: false,
+        }),
+        detectPackageManager: async () => 'winget',
+        isRoot: false,
+        hasSudo: false,
+        confirm: async () => true,
+        setConfig: async () => undefined,
+        dryRun: false,
+        yes: true,
+      });
+      return { run, refreshed };
+    };
+    for (const code of [0, 2316632107, 2316632161]) {
+      const { run, refreshed } = await mk(code);
+      await expect(run).resolves.toMatchObject({ executed: ['packages'] });
+      expect(refreshed[0]).toBe(0); // PATH is refreshed before the first check
+    }
+    await expect((await mk(1)).run).rejects.toMatchObject({ code: 'TOOL_FAILED' });
+  });
+});

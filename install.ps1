@@ -41,8 +41,8 @@ function Invoke-Checked([string]$what, [scriptblock]$block) {
 function Install-WithWinget([string]$id) {
     Say "Installing $id with winget"
     winget install --id $id -e --silent --accept-package-agreements --accept-source-agreements
-    # 0 = installed; -1978335189 (0x8A15002B) = already installed / no update applicable
-    if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1978335189) { throw "winget could not install $id (exit code $LASTEXITCODE)." }
+    # 0 = installed; -1978335189 (0x8A15002B) = no update applicable; -1978335135 (0x8A150061) = already installed
+    if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1978335189 -and $LASTEXITCODE -ne -1978335135) { throw "winget could not install $id (exit code $LASTEXITCODE)." }
     Update-SessionPath
 }
 

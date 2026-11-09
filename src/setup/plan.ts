@@ -5,7 +5,12 @@ export type PackageManager = 'apt' | 'dnf' | 'pacman' | 'brew' | 'winget';
 export interface CommandSpec {
   command: string;
   args: string[];
+  /** Exit codes besides 0 that mean "nothing to do, already fine". */
+  okExitCodes?: number[];
 }
+
+/** winget: 0x8A15002B (no applicable update) and 0x8A150061 (package already installed), unsigned and signed. */
+export const WINGET_ALREADY_INSTALLED = [2316632107, 2316632161, -1978335189, -1978335135];
 
 export type SetupStep =
   | { kind: 'command'; id: string; title: string; spec: CommandSpec; admin: boolean }
@@ -65,6 +70,7 @@ export function wingetInstall(id: string): CommandSpec {
       '--accept-package-agreements',
       '--accept-source-agreements',
     ],
+    okExitCodes: WINGET_ALREADY_INSTALLED,
   };
 }
 
