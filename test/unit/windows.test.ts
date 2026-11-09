@@ -120,3 +120,55 @@ describe('Windows setup plan', () => {
     expect(without.manual[0]).toContain('winget');
   });
 });
+
+describe('which() on Windows', () => {
+  const makeFs = (opts: { statFails: boolean; known: string[] }) => ({
+    access: async (file: string) => {
+      if (!opts.known.includes(file)) throw new Error('ENOENT');
+    },
+    stat: async (file: string) => {
+      if (opts.statFails) throw Object.assign(new Error('EACCES'), { code: 'EACCES' });
+      if (!opts.known.includes(file)) throw new Error('ENOENT');
+      return { isFile: () => true };
+    },
+    lstat: async (file: string) => {
+      if (!opts.known.includes(file)) throw new Error('ENOENT');
+      return { isFile: () => false, isSymbolicLink: () => true };
+    },
+  });
+  const env = {
+    PATH: 'C:\\Windows;C:\\Users\\me\\AppData\\Local\\Microsoft\\WindowsApps',
+    PATHEXT: '.EXE;.CMD',
+  };
+  const alias = 'C:\\Users\\me\\AppData\\Local\\Microsoft\\WindowsApps\\winget.EXE';
+
+  it('finds app execution aliases (winget.exe) even though stat() fails on them', async () => {
+    const { which } = await import('../../src/infrastructure/process/which.js');
+    expect(await which('winget', env, 'win32', makeFs({ statFails: true, known: [alias] }))).toBe(
+      alias,
+    );
+  });
+
+  it('does not accept entries that do not exist, nor use the alias fallback on other systems', async () => {
+    const { which } = await import('../../src/infrastructure/process/which.js');
+    expect(
+      await which('winget', env, 'win32', makeFs({ statFails: true, known: [] })),
+    ).toBeUndefined();
+    expect(
+      await which(
+        'winget',
+        { PATH: '/bin' },
+        'linux',
+        makeFs({ statFails: true, known: ['/bin/winget'] }),
+      ),
+    ).toBeUndefined();
+  });
+
+  it('finds regular executables via PATHEXT', async () => {
+    const { which } = await import('../../src/infrastructure/process/which.js');
+    const cmake = 'C:\\Windows\\cmake.EXE';
+    expect(await which('cmake', env, 'win32', makeFs({ statFails: false, known: [cmake] }))).toBe(
+      cmake,
+    );
+  });
+});

@@ -364,7 +364,7 @@ describe('runSetup', () => {
     expect(h.commands).toEqual([
       'apt-get install -y build-essential cmake ninja-build openjdk-21-jdk',
     ]);
-    expect(result).toMatchObject({ executed: ['packages'], remaining: [] });
+    expect(result).toMatchObject({ executed: ['packages'], remaining: [], incomplete: false });
     expect(h.messages.join('\n')).toContain('Everything required is installed');
   });
 
@@ -424,5 +424,31 @@ describe('runSetup', () => {
         path.join(h.deps.dataDir, 'ghidra', 'ghidra_99.0_PUBLIC', 'support', 'analyzeHeadless'),
       ),
     ).resolves.toBeTruthy();
+  });
+});
+
+describe('runSetup exit status', () => {
+  it('is incomplete when nothing can be installed automatically (so installers do not report success)', async () => {
+    const messages: string[] = [];
+    const log = (text = ''): void => void messages.push(text);
+    const result = await runSetup({
+      platform: 'win32',
+      config: defaultConfig(),
+      out: { line: log, info: log, success: log, warn: log },
+      dataDir: await makeTempDir(),
+      checks: async () => [check('cmake', 'fail')],
+      run: async () => {
+        throw new Error('must not run');
+      },
+      detectPackageManager: async () => undefined,
+      isRoot: false,
+      hasSudo: false,
+      confirm: async () => true,
+      setConfig: async () => undefined,
+      dryRun: false,
+      yes: true,
+    });
+    expect(result).toMatchObject({ executed: [], incomplete: true });
+    expect(messages.join('\n')).toContain('winget');
   });
 });

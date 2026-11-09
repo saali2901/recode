@@ -83,6 +83,8 @@ export interface SetupResult {
   plan: SetupPlan;
   executed: string[];
   remaining: string[];
+  /** True when tools are still missing although the user wanted them installed (not for dry runs or a "no"). */
+  incomplete: boolean;
 }
 
 /** Installs what `recode doctor` finds missing. Everything user-visible goes through `deps.out`. */
@@ -107,7 +109,7 @@ export async function runSetup(deps: SetupDeps): Promise<SetupResult> {
       out.warn(
         'Claude Code is not logged in yet: run "claude" once and sign in with your subscription.',
       );
-    return { plan, executed: [], remaining: [] };
+    return { plan, executed: [], remaining: [], incomplete: false };
   }
 
   out.info(`Missing: ${[...missing].join(', ')}`);
@@ -116,11 +118,12 @@ export async function runSetup(deps: SetupDeps): Promise<SetupResult> {
     plan.steps.forEach((step, i) => out.line(`  ${i + 1}. ${formatStep(step)}`));
   }
   for (const note of plan.manual) out.warn(note);
-  if (plan.steps.length === 0) return { plan, executed: [], remaining: [...missing] };
+  if (plan.steps.length === 0)
+    return { plan, executed: [], remaining: [...missing], incomplete: true };
 
   if (deps.dryRun) {
     out.info('Dry run: nothing was changed.');
-    return { plan, executed: [], remaining: [...missing] };
+    return { plan, executed: [], remaining: [...missing], incomplete: false };
   }
   if (!deps.yes) {
     const answer = await deps.confirm('Continue? [y/N]');
@@ -135,7 +138,7 @@ export async function runSetup(deps: SetupDeps): Promise<SetupResult> {
     }
     if (!answer) {
       out.info('Cancelled. Nothing was changed.');
-      return { plan, executed: [], remaining: [...missing] };
+      return { plan, executed: [], remaining: [...missing], incomplete: false };
     }
   }
 
@@ -161,7 +164,7 @@ export async function runSetup(deps: SetupDeps): Promise<SetupResult> {
   ) {
     out.warn('Last step for you: run "claude" once and log in with your Claude subscription.');
   }
-  return { plan, executed, remaining };
+  return { plan, executed, remaining, incomplete: remaining.length > 0 };
 }
 
 async function executeStep(step: SetupStep, deps: SetupDeps): Promise<void> {
