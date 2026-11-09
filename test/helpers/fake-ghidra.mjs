@@ -36,6 +36,19 @@ function main() {
   if (!imported || !fs.existsSync(imported)) fail('-import file missing');
   if (!scriptPath || !fs.existsSync(path.join(scriptPath, 'ExportAnalysis.java')))
     fail('ExportAnalysis.java not found in -scriptPath');
+  const preIndex = args.indexOf('-preScript');
+  if (preIndex >= 0) {
+    // Real Ghidra resolves the script by name in -scriptPath and passes the rest up to the next option.
+    if (args[preIndex + 1] !== 'ImportDol.java') fail('unknown -preScript');
+    if (!fs.existsSync(path.join(scriptPath, 'ImportDol.java'))) fail('ImportDol.java not found');
+    const scriptArgs = args.slice(preIndex + 2, args.indexOf('-postScript'));
+    if (!/^0x[0-9a-f]+$/.test(scriptArgs[0] ?? '')) fail('ImportDol.java: entry address missing');
+    for (const layout of scriptArgs.slice(1)) {
+      if (!/^[.\w]+,0x[0-9a-f]+,0x[0-9a-f]+,(0x[0-9a-f]+|-),[r-][w-][x-]$/.test(layout))
+        fail(`ImportDol.java: invalid section description ${layout}`);
+    }
+    if (args[args.indexOf('-loader') + 1] !== 'BinaryLoader') fail('DOL needs BinaryLoader');
+  }
   if (!post || post[0] !== 'ExportAnalysis.java') fail('-postScript ExportAnalysis.java missing');
   const [, outDir, maxFunctions, entry] = post;
   if (!outDir || !maxFunctions || !entry) fail('script arguments missing');

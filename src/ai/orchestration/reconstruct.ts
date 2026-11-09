@@ -6,6 +6,7 @@ import type { BinaryRecord, Project } from '../../core/project/project.js';
 import { TaskStore, type Task } from '../../core/tasks/task-store.js';
 import { loadFunctions } from '../../decompiler/extraction/analysis-files.js';
 import type { FunctionInfo } from '../../decompiler/interfaces/schemas.js';
+import { assetPath } from '../../infrastructure/filesystem/assets.js';
 import type { RecodeConfig } from '../../infrastructure/config/config.js';
 import { pathExists, readJson, sha256Text } from '../../infrastructure/filesystem/files.js';
 import { CTargetLanguage, functionTaskId } from '../../reconstruction/c/c-generator.js';
@@ -104,7 +105,8 @@ export async function reconstruct(
     if (!head) break;
     const batch = head.kind === 'function' ? ready.slice(0, config.claude.batchSize) : [head];
     sessions++;
-    const spec = buildBatchSpec(project, binary, config, batch, byTaskId, results);
+    const platformNotes = await installPlatformNotes(project, binary);
+    const spec = buildBatchSpec(project, binary, config, batch, byTaskId, results, platformNotes);
     const name = `${new Date().toISOString().replace(/[:.]/g, '-')}-${String(sessions).padStart(3, '0')}`;
     const batchFile = await writeBatchFile(project, binary.id, name, spec);
     const relativeBatch = path.relative(project.root, batchFile).split(path.sep).join('/');
@@ -246,6 +248,25 @@ function relativeToProject(project: Project, absolute: string): string {
   return path.relative(project.root, absolute).split(path.sep).join('/');
 }
 
+/**
+ * Copies the static, ReCode-owned guidance for the binary's platform next to the reconstruction results, where
+ * agents may read it. Returns its project-relative path, or undefined for binaries without a known platform.
+ */
+async function installPlatformNotes(
+  project: Project,
+  binary: BinaryRecord,
+): Promise<string | undefined> {
+  const platform = binary.metadata.platform;
+  if (!platform) return undefined;
+  const relative = `reconstruction/${binary.id}/platform-notes.md`;
+  await fs.mkdir(project.reconstructionDir(binary.id), { recursive: true });
+  await fs.copyFile(
+    assetPath('templates', 'platforms', `${platform}.md`),
+    path.join(project.root, relative),
+  );
+  return relative;
+}
+
 function buildBatchSpec(
   project: Project,
   binary: BinaryRecord,
@@ -253,6 +274,7 @@ function buildBatchSpec(
   batch: Task[],
   functions: Map<string, FunctionInfo>,
   results: ResultBook,
+  platformNotes: string | undefined,
 ): BatchSpec {
   const analysis = `analysis/${binary.id}`;
   const shared: Record<string, string> = {
@@ -265,6 +287,7 @@ function buildBatchSpec(
   };
   if (results.hasOverview) shared['overview'] = `reconstruction/${binary.id}/overview.md`;
   if (results.typesResult) shared['sharedTypes'] = `reconstruction/${binary.id}/results/types.json`;
+  if (platformNotes) shared['platformNotes'] = platformNotes;
   if (project.references.length > 0) shared['referenceDirectory'] = 'reference/';
 
   const tasks: BatchTask[] = batch.map((task) => {

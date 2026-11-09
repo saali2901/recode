@@ -50,6 +50,7 @@ The web interface opens in your browser. Create a project, drop in your file and
 | PE (EXE, DLL)                                                    | yes                                                              |
 | Mach-O (including universal binaries)                            | yes                                                              |
 | COFF object files (`.obj`)                                       | yes                                                              |
+| GameCube executables (`.dol`) and discs (`.iso`, `.gcm`)         | yes, the disc's boot executable is extracted (no RVZ/WIA/CISO)   |
 | Raw binaries (`.bin`)                                            | yes, you provide architecture, endianness, bits and base address |
 | ZIP archives                                                     | yes, extracted safely; contained binaries are imported           |
 | Reference files (`.c` `.cpp` `.h` `.json` `.yaml` `.txt` `.map`) | stored as reference material, never executed                     |

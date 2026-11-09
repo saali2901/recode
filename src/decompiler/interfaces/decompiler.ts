@@ -21,6 +21,8 @@ export interface DecompileSummary {
   functionCount: number;
   decompiledCount: number;
   failedFunctions: number;
+  /** Non-fatal problems the user should know about, e.g. a degraded processor language. */
+  warnings: string[];
 }
 
 /** A reverse-engineering backend producing the analysis files described in docs/architecture.md. */

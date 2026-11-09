@@ -1,7 +1,9 @@
 import type { DetectionResult, InputAdapter } from '../interfaces/types.js';
 import type { ArchiveLimits } from '../extractors/zip.js';
 import { CoffAdapter } from './coff-adapter.js';
+import { DolAdapter } from './dol-adapter.js';
 import { ElfAdapter } from './elf-adapter.js';
+import { GcmAdapter } from './gcm-adapter.js';
 import { MachOAdapter } from './macho-adapter.js';
 import { PeAdapter } from './pe-adapter.js';
 import { RawBinaryAdapter } from './raw-adapter.js';
@@ -71,6 +73,8 @@ export function createDefaultRegistry(archiveLimits: ArchiveLimits): AdapterRegi
     .register(new PeAdapter())
     .register(new MachOAdapter())
     .register(new CoffAdapter())
+    .register(new GcmAdapter())
+    .register(new DolAdapter())
     .register(new RawBinaryAdapter());
   registry.register(new ZipAdapter(registry, archiveLimits));
   return registry;

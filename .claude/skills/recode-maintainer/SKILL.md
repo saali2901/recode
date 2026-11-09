@@ -44,7 +44,7 @@ Enforcement: the Stop hook in `.claude/settings.json` and the pre-commit hook (`
 - `recode setup` - install missing tools (apt/dnf/pacman/brew/winget, Ghidra, Claude Code); --dry-run, --yes, --only
 - `recode trust` - mark the project folder as trusted for Claude Code
 
-**Input adapters:** elf, pe, macho, coff, raw, zip (plus reference material: .c .cc .cpp .cxx .h .hh .hpp .json .yaml .yml .txt .md .map .sym)
+**Input adapters:** elf, pe, macho, coff, gcm, dol, raw, zip (plus reference material: .c .cc .cpp .cxx .h .hh .hpp .json .yaml .yml .txt .md .map .sym)
 
 ## Project map
 
@@ -60,7 +60,7 @@ Enforcement: the Stop hook in `.claude/settings.json` and the pre-commit hook (`
 - `src/server` - local HTTP server: API, SSE events, jobs, uploads, ZIP download, static files.
 - `src/setup` - `recode setup`: plan per platform, Ghidra release download (SHA-256), Windows PATH refresh.
 - `web/` - React + Vite UI (wizard, projects, settings, doctor) styled with cleanui; built to `dist/web`.
-- `templates/` - `claude/` (agents, settings, CLAUDE.md copied into projects), `c-project/` (CMake template).
+- `templates/` - `claude/` (agents, settings, CLAUDE.md copied into projects), `c-project/` (CMake template), `platforms/` (static per-platform agent notes, e.g. `gamecube.md`).
 - `install.sh`, `install.ps1` - one-command installers; `scripts/skill-guard.mjs` - documentation guard.
 - `test/` - `unit`, `integration` (with test doubles in `test/helpers`), `e2e` (Playwright, opt-in), `fixtures` (C sample).
 
@@ -87,10 +87,14 @@ Enforcement: the Stop hook in `.claude/settings.json` and the pre-commit hook (`
 - Ghidra project directory is created in the system temp dir (Ghidra rejects path elements starting with ".", e.g. `.recode`).
 - Web UI: React + Vite, cleanui theme switcher (8 themes), English, SSE for live progress, jobs run on the server and survive closed tabs, one job per project, no result viewer and no retry/repair buttons yet.
 - Installers: `install.sh` (Linux/macOS, private checksum-verified Node if needed), `install.ps1` (native Windows via winget, WSL optional with `RECODE_WSL=1`), `recode setup` does the tool installs; winget "already installed" exit codes count as success.
+- Platforms: `BinaryMetadata.platform` (currently `gamecube`) selects platform behaviour. A new console needs (1) input adapter(s) that set `platform`, (2) a branch in `src/decompiler/ghidra/import-plan.ts` (language, loader, memory-map script), (3) `templates/platforms/<platform>.md` agent notes, (4) tests with synthetic fixtures. Nothing else in the pipeline is platform-specific.
+- GameCube: `.dol` has no magic, so detection is a strict structural header check (`parsers/dol.ts`); ISOs (`parsers/gcm.ts`) are unpacked to their boot DOL; RVZ/WIA/CISO/GCZ/WBFS and Wii discs are recognized but rejected with a hint (convert to ISO). Ghidra gets the DOL via BinaryLoader plus `ImportDol.java` (pre-script) that rebuilds the real sections; language is `Gekko_Broadway` if the installed Ghidra has it (read from its `.ldefs`), else generic PowerPC with a warning.
 - README is deliberately minimal (see README rules).
 
 ## Known gaps (keep honest)
 
+- GameCube: `ImportDol.java` and the Gekko language choice were never run against a real Ghidra (only against the command-line-compatible fake); only the boot DOL of a disc is extracted (no `.rel` modules, no other disc files); no r2/r13 small-data register setup; no SDK function signatures (names are guesses by the agents); compressed discs need conversion to ISO first; Wii/MEM2 unsupported.
+- ELF-based tests need a Linux `gcc` fixture (`test/fixtures/build/sample-x86_64`); on native Windows they fail for that reason, not because of the code.
 - Native Windows (winget, `.cmd` launching, Claude permission rules with `C:/` paths) is only partly verified by the owner's manual runs; Ghidra 12.2 import worked, `ExportAnalysis.java` was not confirmed against real Ghidra output yet unless noted in the change log.
 - No functional-equivalence or fidelity check (reported `not-assessed`).
 - Web UI cannot show reconstructed code or trigger repair/retry.
@@ -103,6 +107,7 @@ Enforcement: the Stop hook in `.claude/settings.json` and the pre-commit hook (`
 
 ## Change log (newest first)
 
+- 2026-11-09 - GameCube support: DOL + ISO adapters (`parsers/dol.ts`, `parsers/gcm.ts`), `platform`/`game` metadata, Ghidra import plan with `ImportDol.java` and Gekko language lookup, platform notes for agents (`templates/platforms/gamecube.md`), tests with synthetic DOL/ISO builders.
 - 2026-11-09 - Added this skill, `scripts/skill-guard.mjs` (Stop hook + pre-commit), `test/unit/docs-sync.test.ts`; README reduced to Installation/Start/Commands/Supported files.
 - 2026-11-09 - Usage-limit and untrusted-folder handling (`RATE_LIMIT`, `UNTRUSTED`, `recode trust`, UI button, `--disallowedTools`).
 - 2026-11-09 - Ghidra project dir moved to the temp dir (real Ghidra 12.2 rejected `.recode`).

@@ -1,0 +1,193 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { describe, expect, it } from 'vitest';
+import { RecodeError } from '../../src/core/errors/index.js';
+import { findGekkoLanguage, planImport } from '../../src/decompiler/ghidra/import-plan.js';
+import { defaultConfig } from '../../src/infrastructure/config/config.js';
+import { createDefaultRegistry } from '../../src/input/adapters/registry.js';
+import { BinaryMetadataSchema, type InputAdapter } from '../../src/input/interfaces/types.js';
+import { buildDol, buildGcm, buildPe, buildZip } from '../helpers/binaries.js';
+import { makeTempDir, registerTempCleanup } from '../helpers/tmp.js';
+
+registerTempCleanup();
+const registry = createDefaultRegistry(defaultConfig().archive);
+
+function adapter(id: string): InputAdapter {
+  const found = registry.get(id);
+  if (!found) throw new Error(`adapter ${id} missing`);
+  return found;
+}
+
+async function write(name: string, data: Buffer): Promise<string> {
+  const file = path.join(await makeTempDir(), name);
+  await fs.writeFile(file, data);
+  return file;
+}
+
+function dolWith(patch: (header: Buffer) => void): Buffer {
+  const dol = buildDol();
+  patch(dol);
+  return dol;
+}
+
+describe('DOL detection and metadata', () => {
+  it('recognizes a valid DOL by structure and reads sections, entry and bss', async () => {
+    const file = await write('main.dol', buildDol());
+    expect(await registry.detect(file)).toMatchObject({
+      adapterId: 'dol',
+      kind: 'binary',
+      format: 'dol',
+    });
+    const metadata = await adapter('dol').getMetadata(file);
+    expect(BinaryMetadataSchema.parse(metadata)).toMatchObject({
+      format: 'dol',
+      platform: 'gamecube',
+      architecture: 'ppc',
+      bits: 32,
+      endianness: 'big',
+      entryPoint: '0x80003100',
+      baseAddress: '0x80003100',
+    });
+    expect(metadata.sections.map((s) => s.name)).toEqual(['.text0', '.data0', '.bss']);
+    expect(metadata.segments[0]).toMatchObject({ fileOffset: '0x100', fileSize: '0x40' });
+  });
+
+  it('is also recognized without the .dol extension, with lower confidence', async () => {
+    const named = await registry.detect(await write('x.dol', buildDol()));
+    const unnamed = await registry.detect(await write('x.dat', buildDol()));
+    expect(unnamed.adapterId).toBe('dol');
+    expect(unnamed.confidence).toBeLessThan(named.confidence);
+  });
+
+  it.each([
+    ['entry outside any text section', (h: Buffer) => h.writeUInt32BE(0x8000_9000, 0xe0)],
+    ['section beyond end of file', (h: Buffer) => h.writeUInt32BE(0x10_0000, 0x90)],
+    ['section outside of main memory', (h: Buffer) => h.writeUInt32BE(0x1000, 0x48)],
+    ['unaligned section address', (h: Buffer) => h.writeUInt32BE(0x8000_3101, 0x48)],
+    ['section overlapping the header', (h: Buffer) => h.writeUInt32BE(0x80, 0x00)],
+    ['overlapping sections in memory', (h: Buffer) => h.writeUInt32BE(0x8000_3110, 0x48 + 7 * 4)],
+    ['bss outside of main memory', (h: Buffer) => h.writeUInt32BE(0x9000_0000, 0xd8)],
+  ])('rejects a header with %s', async (_label, patch) => {
+    const file = await write('bad.dol', dolWith(patch));
+    expect((await registry.detect(file)).adapterId).not.toBe('dol');
+    await expect(adapter('dol').getMetadata(file)).rejects.toBeInstanceOf(RecodeError);
+  });
+
+  it('does not mistake other formats or noise for a DOL', async () => {
+    for (const data of [buildPe({}), Buffer.alloc(0x400), Buffer.from('hello world')]) {
+      expect((await registry.detect(await write('f.dol', data))).adapterId).not.toBe('dol');
+    }
+  });
+
+  it('rejects a DOL without a text section', async () => {
+    const data = buildDol({ text: { slot: 7, address: 0x8000_3100, data: Buffer.alloc(0x40) } });
+    expect((await registry.detect(await write('d.dol', data))).adapterId).not.toBe('dol');
+  });
+
+  it('imports a DOL byte for byte into the project input directory', async () => {
+    const dol = buildDol();
+    const [prepared] = await adapter('dol').prepare(
+      await write('main.dol', dol),
+      await makeTempDir(),
+    );
+    expect(prepared && (await fs.readFile(prepared.path))).toEqual(dol);
+  });
+});
+
+describe('GameCube disc images', () => {
+  it('detects a disc and extracts the boot DOL with game information', async () => {
+    const dol = buildDol();
+    const file = await write('game.iso', buildGcm(dol, { gameId: 'GM4P01', title: 'Mario Kart' }));
+    expect(await registry.detect(file)).toMatchObject({ adapterId: 'gcm', format: 'gcm' });
+
+    const [prepared] = await adapter('gcm').prepare(file, await makeTempDir());
+    expect(prepared && path.basename(prepared.path)).toBe('GM4P01-boot.dol');
+    expect(prepared && (await fs.readFile(prepared.path))).toEqual(dol);
+    expect(prepared?.metadata).toMatchObject({
+      format: 'dol',
+      platform: 'gamecube',
+      game: { gameId: 'GM4P01', title: 'Mario Kart', region: 'PAL (Europe)', version: 2 },
+    });
+  });
+
+  it('never overwrites a previously extracted DOL', async () => {
+    const file = await write('game.iso', buildGcm(buildDol()));
+    const out = await makeTempDir();
+    const [first] = await adapter('gcm').prepare(file, out);
+    const [second] = await adapter('gcm').prepare(file, out);
+    expect(second?.path).not.toBe(first?.path);
+  });
+
+  it('explains compressed containers and Wii discs instead of failing obscurely', async () => {
+    const rvz = await write(
+      'game.rvz',
+      Buffer.concat([Buffer.from('RVZ\x01', 'latin1'), Buffer.alloc(0x500)]),
+    );
+    expect(await registry.detect(rvz)).toMatchObject({ adapterId: 'gcm', kind: 'binary' });
+    await expect(adapter('gcm').prepare(rvz, await makeTempDir())).rejects.toThrow(/RVZ/);
+
+    const wii = await write('wii.iso', buildGcm(buildDol(), { wii: true }));
+    await expect(adapter('gcm').prepare(wii, await makeTempDir())).rejects.toThrow(/Wii/);
+  });
+
+  it('reports a damaged disc (DOL offset outside the image, or a corrupt DOL)', async () => {
+    const outside = buildGcm(buildDol());
+    outside.writeUInt32BE(0x7fff_0000, 0x420);
+    const corrupt = buildGcm(buildDol());
+    corrupt.writeUInt32BE(0, 0x1_0000 + 0xe0);
+    for (const data of [outside, corrupt]) {
+      const file = await write('bad.iso', data);
+      await expect(adapter('gcm').prepare(file, await makeTempDir())).rejects.toThrow(
+        /damaged GameCube disc/,
+      );
+    }
+  });
+
+  it('imports discs found inside a ZIP archive', async () => {
+    const zip = await write(
+      'game.zip',
+      buildZip([{ name: 'game.iso', data: buildGcm(buildDol()), method: 0 }]),
+    );
+    expect((await registry.detect(zip)).adapterId).toBe('zip');
+    const [prepared] = await adapter('zip').prepare(zip, await makeTempDir());
+    expect(prepared?.metadata.platform).toBe('gamecube');
+  });
+});
+
+describe('Ghidra import plan', () => {
+  it('maps a DOL onto its real sections and starts at the entry point', async () => {
+    const metadata = await adapter('dol').getMetadata(await write('main.dol', buildDol()));
+    const plan = planImport(metadata, { gekkoLanguage: 'PowerPC:BE:32:Gekko_Broadway' });
+    expect(plan.entry).toBe('0x80003100');
+    expect(plan.warnings).toEqual([]);
+    expect(plan.args).toEqual(
+      expect.arrayContaining([
+        '-processor',
+        'PowerPC:BE:32:Gekko_Broadway',
+        '-preScript',
+        'ImportDol.java',
+      ]),
+    );
+    expect(plan.args).toContain('.text0,0x80003100,0x40,0x100,r-x');
+    expect(plan.args).toContain('.bss,0x80005000,0x100,-,rw-');
+  });
+
+  it('falls back to generic PowerPC with a warning when Ghidra lacks Gekko', async () => {
+    const metadata = await adapter('dol').getMetadata(await write('m.dol', buildDol()));
+    const plan = planImport(metadata, {});
+    expect(plan.args).toContain('PowerPC:BE:32:default');
+    expect(plan.warnings[0]).toMatch(/Gekko/);
+  });
+
+  it('finds the Gekko language in a Ghidra installation', async () => {
+    const root = await makeTempDir();
+    const languages = path.join(root, 'Ghidra', 'Processors', 'PowerPC', 'data', 'languages');
+    await fs.mkdir(languages, { recursive: true });
+    expect(await findGekkoLanguage(root)).toBeUndefined();
+    await fs.writeFile(
+      path.join(languages, 'ppc.ldefs'),
+      '<language id="PowerPC:BE:32:default"/><language id="PowerPC:BE:32:Gekko_Broadway"/>',
+    );
+    expect(await findGekkoLanguage(root)).toBe('PowerPC:BE:32:Gekko_Broadway');
+  });
+});

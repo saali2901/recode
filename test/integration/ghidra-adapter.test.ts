@@ -8,6 +8,7 @@ import {
 import { ghidraLanguageId } from '../../src/decompiler/ghidra/language.js';
 import { findGhidra } from '../../src/decompiler/ghidra/locate.js';
 import { Project } from '../../src/core/project/project.js';
+import { buildDol, buildGcm } from '../helpers/binaries.js';
 import { SAMPLE_ELF } from '../helpers/tools.js';
 import { createWorld } from '../helpers/world.js';
 import { registerTempCleanup } from '../helpers/tmp.js';
@@ -96,6 +97,29 @@ describe('Ghidra adapter (against a command-line compatible fake)', () => {
       'ARM:LE:32:v8',
     ]);
     expect(args.slice(-1)).toEqual(['0x8010']);
+  });
+
+  it('imports a GameCube ISO and builds the DOL memory-map import for Ghidra', async () => {
+    const world = await createWorld();
+    const iso = path.join(world.workDir, 'game.iso');
+    await fs.writeFile(iso, buildGcm(buildDol(), { gameId: 'GALE01', title: 'Test' }));
+    const imported = await world.run(['import', iso]);
+    expect(imported.code, imported.stderr).toBe(0);
+    const analyzed = await world.run(['analyze'], { overrides: HERMETIC });
+    expect(analyzed.code, analyzed.stderr).toBe(0);
+    expect(analyzed.stderr).toContain('Gekko'); // fake Ghidra has no Gekko language: user is warned
+    const args = JSON.parse(
+      (await fs.readFile(world.ghidraLog, 'utf8')).trim().split('\n')[0]!,
+    ) as string[];
+    const pre = args.indexOf('-preScript');
+    expect(args.slice(pre, pre + 3)).toEqual(['-preScript', 'ImportDol.java', '0x80003100']);
+    expect(args).toContain('PowerPC:BE:32:default');
+    expect(args.slice(-1)).toEqual(['0x80003100']);
+  });
+
+  it('bundles the DOL import script', async () => {
+    const script = await fs.readFile(path.join(bundledScriptDirectory(), 'ImportDol.java'), 'utf8');
+    expect(script).toContain('class ImportDol extends GhidraScript');
   });
 
   it('maps architectures to Ghidra language ids', () => {

@@ -3,7 +3,7 @@ import { z } from 'zod';
 /** Hex-encoded address or size, e.g. "0x401000". Avoids 53-bit precision loss in JSON. */
 export const HexSchema = z.string().regex(/^0x[0-9a-f]+$/);
 
-export const BinaryFormatSchema = z.enum(['elf', 'pe', 'macho', 'coff', 'raw']);
+export const BinaryFormatSchema = z.enum(['elf', 'pe', 'macho', 'coff', 'dol', 'raw']);
 export type BinaryFormat = z.infer<typeof BinaryFormatSchema>;
 
 export const BinaryKindSchema = z.enum(['executable', 'shared-library', 'object', 'raw', 'other']);
@@ -26,6 +26,20 @@ export type Architecture = z.infer<typeof ArchitectureSchema>;
 
 export const EndiannessSchema = z.enum(['little', 'big']);
 export type Endianness = z.infer<typeof EndiannessSchema>;
+
+/** Console or system a binary was built for. Drives platform-specific analysis and agent guidance. */
+export const PlatformSchema = z.enum(['gamecube']);
+export type Platform = z.infer<typeof PlatformSchema>;
+
+/** Identification of the game a binary belongs to, read from a disc image header. */
+export const GameInfoSchema = z.object({
+  gameId: z.string(),
+  title: z.string(),
+  region: z.string().optional(),
+  discNumber: z.number().int().nonnegative().optional(),
+  version: z.number().int().nonnegative().optional(),
+});
+export type GameInfo = z.infer<typeof GameInfoSchema>;
 
 export const SectionSchema = z.object({
   name: z.string(),
@@ -68,6 +82,8 @@ export const BinaryMetadataSchema = z.object({
   segments: z.array(SegmentSchema),
   symbols: z.array(BinarySymbolSchema),
   symbolsTruncated: z.boolean().default(false),
+  platform: PlatformSchema.optional(),
+  game: GameInfoSchema.optional(),
   /** Where the information came from. "user" means supplied via CLI for raw binaries. */
   source: z.enum(['headers', 'user']).default('headers'),
   warnings: z.array(z.string()).default([]),
@@ -79,7 +95,7 @@ export type DetectionKind = 'binary' | 'archive' | 'reference' | 'unknown';
 export interface DetectionResult {
   adapterId: string;
   kind: DetectionKind;
-  format?: BinaryFormat | 'zip' | 'reference';
+  format?: BinaryFormat | 'gcm' | 'zip' | 'reference';
   /** 0..1; headers with valid magic and structure score 1. */
   confidence: number;
   description: string;

@@ -8,7 +8,7 @@ import { runProcess, succeeded } from '../../infrastructure/process/process-mana
 import { validateAnalysisDirectory } from '../extraction/analysis-files.js';
 import type { DecompileRequest, DecompileSummary, Decompiler } from '../interfaces/decompiler.js';
 import { findGhidra, type GhidraInstallation } from './locate.js';
-import { ghidraLanguageId } from './language.js';
+import { findGekkoLanguage, planImport, type ImportPlan } from './import-plan.js';
 
 export const SCRIPT_NAME = 'ExportAnalysis.java';
 
@@ -53,7 +53,10 @@ export class GhidraDecompiler implements Decompiler {
     await fs.mkdir(staging, { recursive: true });
     const projectDir = await createProjectDirectory(request);
 
-    const args = this.buildArguments(request, { staging, projectDir, scriptDir });
+    const plan = planImport(request.metadata, {
+      gekkoLanguage: await findGekkoLanguage(installation.installDir),
+    });
+    const args = this.buildArguments(request, plan, { staging, projectDir, scriptDir });
     const result = await runProcess({
       command: installation.headlessPath,
       args,
@@ -97,6 +100,7 @@ export class GhidraDecompiler implements Decompiler {
         functionCount: functions.length,
         decompiledCount: functions.filter((f) => f.decompiledFile !== null).length,
         failedFunctions: functions.filter((f) => f.decompileError).length,
+        warnings: plan.warnings,
       };
     } finally {
       await fs.rm(staging, { recursive: true, force: true });
@@ -106,9 +110,9 @@ export class GhidraDecompiler implements Decompiler {
 
   private buildArguments(
     request: DecompileRequest,
+    plan: ImportPlan,
     dirs: { staging: string; projectDir: string; scriptDir: string },
   ): string[] {
-    const { metadata } = request;
     const args = [
       dirs.projectDir,
       'recode',
@@ -121,26 +125,13 @@ export class GhidraDecompiler implements Decompiler {
       '-scriptPath',
       dirs.scriptDir,
     ];
-    if (metadata.format === 'raw') {
-      const language = ghidraLanguageId(metadata);
-      if (!language || !metadata.baseAddress) {
-        throw new RecodeError('INVALID_INPUT', 'Raw binary lacks architecture or base address.');
-      }
-      args.push(
-        '-loader',
-        'BinaryLoader',
-        '-loader-baseAddr',
-        metadata.baseAddress,
-        '-processor',
-        language,
-      );
-    }
     args.push(
+      ...plan.args,
       '-postScript',
       SCRIPT_NAME,
       dirs.staging,
       String(request.maxFunctions),
-      metadata.format === 'raw' && metadata.entryPoint ? metadata.entryPoint : '-',
+      plan.entry,
     );
     return args;
   }

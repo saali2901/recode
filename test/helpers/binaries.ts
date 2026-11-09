@@ -221,3 +221,60 @@ export function buildZip(entries: ZipEntrySpec[]): Buffer {
   eocd.writeUInt32LE(offset, 16);
   return Buffer.concat([...locals, centralBytes, eocd]);
 }
+
+export interface DolSectionSpec {
+  slot: number;
+  address: number;
+  data: Buffer;
+}
+
+/** Builds a minimal valid GameCube DOL with one text section (slot 0) and one data section (slot 7). */
+export function buildDol(
+  options: {
+    text?: DolSectionSpec;
+    data?: DolSectionSpec;
+    bss?: { address: number; size: number };
+    entry?: number;
+  } = {},
+): Buffer {
+  const text = options.text ?? {
+    slot: 0,
+    address: 0x8000_3100,
+    data: Buffer.alloc(0x40, 0x60), // "nop" words
+  };
+  const data = options.data ?? { slot: 7, address: 0x8000_4000, data: Buffer.alloc(0x20, 0xab) };
+  const specs = [text, data];
+  const header = Buffer.alloc(0x100);
+  let offset = 0x100;
+  const chunks: Buffer[] = [header];
+  for (const spec of specs) {
+    header.writeUInt32BE(offset, spec.slot * 4);
+    header.writeUInt32BE(spec.address, 0x48 + spec.slot * 4);
+    header.writeUInt32BE(spec.data.length, 0x90 + spec.slot * 4);
+    chunks.push(spec.data);
+    offset += spec.data.length;
+  }
+  const bss = options.bss ?? { address: 0x8000_5000, size: 0x100 };
+  header.writeUInt32BE(bss.address, 0xd8);
+  header.writeUInt32BE(bss.size, 0xdc);
+  header.writeUInt32BE(options.entry ?? text.address, 0xe0);
+  return Buffer.concat(chunks);
+}
+
+/** Builds a GameCube disc image whose boot DOL is `dol`, placed at a 4-byte aligned offset behind the apploader. */
+export function buildGcm(
+  dol: Buffer,
+  options: { gameId?: string; title?: string; dolOffset?: number; wii?: boolean } = {},
+): Buffer {
+  const dolOffset = options.dolOffset ?? 0x1_0000;
+  const disc = Buffer.alloc(dolOffset + dol.length + 0x100);
+  disc.write(options.gameId ?? 'GALE01', 0, 'latin1');
+  disc.writeUInt8(0, 6);
+  disc.writeUInt8(2, 7);
+  if (options.wii) disc.writeUInt32BE(0x5d1c9ea3, 0x18);
+  else disc.writeUInt32BE(0xc2339f3d, 0x1c);
+  disc.write(options.title ?? 'TEST GAME', 0x20, 'latin1');
+  disc.writeUInt32BE(dolOffset, 0x420);
+  dol.copy(disc, dolOffset);
+  return disc;
+}

@@ -127,7 +127,7 @@ describe('skill and README stay in sync with the code', () => {
 
   it('README names every supported input format', () => {
     const supported = section(readme, /^## Supported files/m);
-    for (const format of ['ELF', 'PE', 'Mach-O', 'COFF', 'Raw', 'ZIP'])
+    for (const format of ['ELF', 'PE', 'Mach-O', 'COFF', 'GameCube', 'Raw', 'ZIP'])
       expect(supported).toContain(format);
   });
 });

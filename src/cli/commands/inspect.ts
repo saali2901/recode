@@ -37,6 +37,12 @@ export function registerInspect(program: Command, runtime: Runtime): void {
         `Format:        ${m.format} (${m.kind})${m.source === 'user' ? '  [supplied by user]' : ''}`,
       );
       out.line(`Architecture:  ${m.architecture}, ${m.bits}-bit, ${m.endianness}-endian`);
+      if (m.platform) out.line(`Platform:      ${m.platform}`);
+      if (m.game) {
+        out.line(
+          `Game:          ${m.game.title} (${m.game.gameId}${m.game.region ? `, ${m.game.region}` : ''})`,
+        );
+      }
       out.line(`Entry point:   ${m.entryPoint ?? '(none)'}`);
       out.line(`Base address:  ${m.baseAddress ?? '(unknown)'}`);
       for (const warning of m.warnings) out.warn(warning);

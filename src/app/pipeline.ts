@@ -101,6 +101,7 @@ export async function analyzeStep(
         ...(deps.signal ? { signal: deps.signal } : {}),
       });
       await writeJsonAtomic(path.join(outputDirectory, 'metadata.json'), binary.metadata);
+      for (const message of summary.warnings) deps.events.emit({ type: 'warning', message });
       return {
         summary: `${summary.tool} ${summary.toolVersion}: ${summary.functionCount} functions, ${summary.decompiledCount} decompiled`,
       };

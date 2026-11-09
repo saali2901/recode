@@ -23,25 +23,25 @@ place that connects the layers. External programs (Ghidra, Claude Code, CMake) a
 
 ## Modules
 
-| Module                    | Responsibility                                                                             |
-| ------------------------- | ------------------------------------------------------------------------------------------ |
-| `core/errors`             | `RecodeError` with stable codes → CLI exit codes                                           |
-| `core/project`            | Project directory, `recode.json` manifest, binary registry (by SHA-256), lock file         |
-| `core/workflow`           | Per-binary step state machine (`pending/running/completed/failed/cancelled`), fingerprints |
-| `core/tasks`              | Persistent reconstruction task list with dependencies, attempts, crash recovery            |
-| `core/events`             | Typed event bus consumed by the CLI progress output and the log                            |
-| `input/parsers`           | Bounds-checked ELF, PE, Mach-O, COFF parsers on a random-access file view                  |
-| `input/adapters`          | `InputAdapter` implementations + `AdapterRegistry`                                         |
-| `input/extractors/zip.ts` | Own safe ZIP reader (stored/deflate) with all limits                                       |
-| `input/import-service.ts` | Detect → prepare → register in the project                                                 |
-| `decompiler/interfaces`   | `Decompiler` interface, Zod schemas of the analysis files                                  |
-| `decompiler/ghidra`       | Installation lookup, headless invocation, language IDs, staging + atomic swap of results   |
-| `decompiler/scripts`      | `ExportAnalysis.java` – runs inside Ghidra, writes the JSON files                          |
-| `ai/claude`               | `claude -p` runner and tolerant `stream-json` event parser                                 |
-| `ai/orchestration`        | Planner (task DAG), batch files, reconstruct loop, review, session log                     |
-| `ai/prompts`              | Prompt builders and batch file schema                                                      |
-| `reconstruction`          | `TargetLanguage` interface, result schemas, C project generator (`templates/c-project`)    |
-| `validation`              | CMake/Ninja build, diagnostics parser/attribution, registered validation checks            |
+| Module                    | Responsibility                                                                                                                        |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `core/errors`             | `RecodeError` with stable codes → CLI exit codes                                                                                      |
+| `core/project`            | Project directory, `recode.json` manifest, binary registry (by SHA-256), lock file                                                    |
+| `core/workflow`           | Per-binary step state machine (`pending/running/completed/failed/cancelled`), fingerprints                                            |
+| `core/tasks`              | Persistent reconstruction task list with dependencies, attempts, crash recovery                                                       |
+| `core/events`             | Typed event bus consumed by the CLI progress output and the log                                                                       |
+| `input/parsers`           | Bounds-checked ELF, PE, Mach-O, COFF, DOL and GameCube disc parsers on a random-access file view                                      |
+| `input/adapters`          | `InputAdapter` implementations + `AdapterRegistry`                                                                                    |
+| `input/extractors/zip.ts` | Own safe ZIP reader (stored/deflate) with all limits                                                                                  |
+| `input/import-service.ts` | Detect → prepare → register in the project                                                                                            |
+| `decompiler/interfaces`   | `Decompiler` interface, Zod schemas of the analysis files                                                                             |
+| `decompiler/ghidra`       | Installation lookup, headless invocation, language IDs, per-platform import plan (`import-plan.ts`), staging + atomic swap of results |
+| `decompiler/scripts`      | `ExportAnalysis.java` (writes the JSON files) and `ImportDol.java` (rebuilds a DOL's memory map) – run inside Ghidra                  |
+| `ai/claude`               | `claude -p` runner and tolerant `stream-json` event parser                                                                            |
+| `ai/orchestration`        | Planner (task DAG), batch files, reconstruct loop, review, session log                                                                |
+| `ai/prompts`              | Prompt builders and batch file schema                                                                                                 |
+| `reconstruction`          | `TargetLanguage` interface, result schemas, C project generator (`templates/c-project`)                                               |
+| `validation`              | CMake/Ninja build, diagnostics parser/attribution, registered validation checks                                                       |
 
 ## Data flow and project layout
 
@@ -81,6 +81,27 @@ validation (`VALIDATION_CHECKS` is a list of functions). There is deliberately n
 **Python workers (future):** tools such as angr, LIEF or Capstone can be added as isolated external programs that read
 a binary and write JSON files in the same schemas, started through `runProcess` like Ghidra. Nothing in the TypeScript
 core assumes Ghidra; the core only consumes `analysis/<id>/*.json`.
+
+## Platforms (GameCube first)
+
+`BinaryMetadata.platform` marks binaries built for a console. It is set by the input adapters and consumed in exactly
+two places: `decompiler/ghidra/import-plan.ts` (how Ghidra loads the file) and the reconstruction step, which copies
+`templates/platforms/<platform>.md` next to the results and lists it as `platformNotes` in every batch file.
+
+**GameCube.** A DOL has no magic number, so `DolAdapter` accepts a file only if the whole header is consistent
+(section bounds, alignment, MEM1 range, no overlaps, entry inside a text section). `GcmAdapter` reads the disc header
+(game ID, title, region, boot DOL offset), copies the boot DOL into `input/` as `<gameId>-boot.dol` and records the game
+in the metadata. Compressed containers (RVZ, WIA, CISO, GCZ, WBFS) and Wii discs are recognized and rejected with a hint
+because decoding them needs a library ReCode does not ship; convert to ISO with Dolphin.
+
+Ghidra has no DOL loader. ReCode imports the file with `BinaryLoader` and runs `ImportDol.java` as `-preScript`: it
+removes the single block, creates one block per DOL section (text `r-x`, data `rw-`, `.bss` uninitialized) from the
+same file bytes, and labels the entry `__start`. The language is `PowerPC:BE:32:Gekko_Broadway` when the installed
+Ghidra defines it (found by reading its `.ldefs` files); otherwise generic PowerPC is used and a warning is emitted.
+
+**Adding a platform** (PS1, SNES, Wii, ...): add adapter(s) that set `platform` and the real architecture facts, add a
+branch to `planImport` (language, loader, optional pre-script), add `templates/platforms/<platform>.md`, extend
+`PlatformSchema`, and test with synthetic fixtures like `buildDol`/`buildGcm` in `test/helpers/binaries.ts`.
 
 ## Workflow and recovery
 
@@ -134,6 +155,10 @@ files (headers, CMake) and cannot conflict.
   one session at a time.
 - Dependency waves: a function is only reconstructed after its callees, so deep call chains need many small sessions
   (this is slower, but yields better prototypes for callers).
+- GameCube: `ImportDol.java` and the Gekko language selection were only tested against the command-line-compatible fake,
+  not a real Ghidra. Only the boot DOL of a disc is extracted (no `.rel` modules or other disc files). Small-data
+  registers r2/r13 are not set up, so Ghidra may not resolve `.sdata` accesses. Discs inside a ZIP are limited by
+  `archive.maxFileBytes` (default 512 MiB), so import ISOs directly (uploads up to 2 GiB).
 - C only. The target language is behind the `TargetLanguage` interface but no second language exists.
 - Parsers: no PE import table, no Mach-O function starts, ZIP64/nested archives/encrypted entries unsupported,
   symbol lists capped at 20,000 entries.
