@@ -24,6 +24,12 @@ if (mode === 'hang') setInterval(() => {}, 1000);
 else main();
 
 function main() {
+  // Real Ghidra: "Path element starting with '.' is not permitted" for the project directory.
+  if (args[0] && args[0].split(/[\\/]/).some((s) => s.startsWith('.') && s !== '.' && s !== '..')) {
+    fail(
+      "ERROR Abort due to Headless analyzer error: Path element starting with '.' is not permitted",
+    );
+  }
   const [imported] = after('-import') ?? [];
   const [scriptPath] = after('-scriptPath') ?? [];
   const post = after('-postScript', 4);

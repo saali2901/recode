@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { RecodeError } from '../../core/errors/index.js';
 import { assetPath } from '../../infrastructure/filesystem/assets.js';
@@ -48,11 +49,9 @@ export class GhidraDecompiler implements Decompiler {
     const scriptDir = this.options.scriptDirectory ?? bundledScriptDirectory();
 
     const staging = `${request.outputDirectory}.staging-${process.pid}`;
-    const projectDir = path.join(request.workDirectory, 'ghidra-project');
     await fs.rm(staging, { recursive: true, force: true });
-    await fs.rm(projectDir, { recursive: true, force: true });
     await fs.mkdir(staging, { recursive: true });
-    await fs.mkdir(projectDir, { recursive: true });
+    const projectDir = await createProjectDirectory(request);
 
     const args = this.buildArguments(request, { staging, projectDir, scriptDir });
     const result = await runProcess({
@@ -145,6 +144,32 @@ export class GhidraDecompiler implements Decompiler {
     );
     return args;
   }
+}
+
+/** Ghidra rejects project paths that contain an element starting with a dot (e.g. ".recode"). */
+export function hasHiddenSegment(target: string): boolean {
+  return path
+    .resolve(target)
+    .split(/[\\/]/)
+    .some((segment) => segment.startsWith('.') && segment !== '.' && segment !== '..');
+}
+
+/**
+ * Creates a scratch directory for Ghidra's project files. The project's own work directory cannot be used
+ * (it lives below ".recode"), so the system temp directory is preferred.
+ */
+export async function createProjectDirectory(request: DecompileRequest): Promise<string> {
+  const parents = [os.tmpdir(), path.dirname(request.outputDirectory)];
+  for (const parent of parents) {
+    if (hasHiddenSegment(parent)) continue;
+    await fs.mkdir(parent, { recursive: true });
+    return fs.mkdtemp(path.join(parent, 'recode-ghidra-'));
+  }
+  throw new RecodeError(
+    'TOOL_FAILED',
+    'No directory without a dot-prefixed path element is available for the Ghidra project.',
+    { hint: 'Ghidra rejects such paths. Set TMPDIR (or TEMP on Windows) to a normal directory.' },
+  );
 }
 
 async function swapDirectory(staging: string, target: string): Promise<void> {

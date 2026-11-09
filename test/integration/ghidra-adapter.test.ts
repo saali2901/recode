@@ -186,3 +186,20 @@ describe('Ghidra adapter (against a command-line compatible fake)', () => {
     ).rejects.toMatchObject({ code: 'CANCELLED' });
   });
 });
+
+describe('Ghidra project directory', () => {
+  it('never lies below a dot-prefixed directory such as .recode (real Ghidra rejects it)', async () => {
+    const { hasHiddenSegment, createProjectDirectory } =
+      await import('../../src/decompiler/ghidra/ghidra-decompiler.js');
+    expect(hasHiddenSegment('/home/u/proj/.recode/work')).toBe(true);
+    expect(hasHiddenSegment('C:\\Users\\u\\proj\\.recode\\work')).toBe(true);
+    expect(hasHiddenSegment('/home/u/proj/analysis')).toBe(false);
+    expect(hasHiddenSegment('/home/u/proj/./analysis/../x')).toBe(false);
+    const dir = await createProjectDirectory({
+      workDirectory: '/x/.recode/work/b',
+      outputDirectory: '/x/analysis/b',
+    } as Parameters<typeof createProjectDirectory>[0]);
+    expect(hasHiddenSegment(dir)).toBe(false);
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+});
