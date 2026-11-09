@@ -25,4 +25,9 @@ export default tseslint.config(
     files: ['test/**/*.ts'],
     rules: { '@typescript-eslint/no-non-null-assertion': 'off' },
   },
+  {
+    // API responses are untyped JSON in these tests.
+    files: ['test/integration/server.test.ts'],
+    rules: { '@typescript-eslint/no-explicit-any': 'off' },
+  },
 );

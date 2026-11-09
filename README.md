@@ -78,6 +78,13 @@ recode validate [--ai-review]
 Results: `analysis/<id>/` (Ghidra JSON, decompiled C, assembly), `source/<id>/` (the generated C project incl.
 `RECONSTRUCTION.md`), `build/<id>/`, `reconstruction/<id>/` (agent results, validation report).
 
+## Web interface
+
+`recode ui` starts a local web UI (127.0.0.1 only, random access token) with a step-by-step wizard, live progress,
+settings and doctor. See [docs/web-ui.md](docs/web-ui.md).
+
+![Reconstruct step](docs/screenshots/03-reconstruct.png)
+
 ## Commands
 
 | Command                      | Purpose                                                                                                       |

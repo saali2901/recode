@@ -78,6 +78,13 @@ export const ConfigSchema = z
       })
       .strict()
       .default({ timeoutSeconds: 600 }),
+    ui: z
+      .object({
+        /** Directory scanned for projects by "recode ui". */
+        workspace: z.string().min(1).optional(),
+      })
+      .strict()
+      .default({}),
     logging: z
       .object({ level: z.enum(['trace', 'debug', 'info', 'warn', 'error']).default('info') })
       .strict()

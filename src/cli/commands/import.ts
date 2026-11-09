@@ -1,17 +1,13 @@
+import path from 'node:path';
 import type { Command } from 'commander';
+import { detectFile, importIntoProject } from '../../app/import-file.js';
 import { RecodeError } from '../../core/errors/index.js';
-import { WorkflowManager } from '../../core/workflow/workflow.js';
-import { createDefaultRegistry } from '../../input/adapters/registry.js';
 import { RAW_OPTION_HELP } from '../../input/adapters/raw-adapter.js';
-import { ImportService } from '../../input/import-service.js';
 import {
   ArchitectureSchema,
   RawBinaryOptionsSchema,
   type MetadataHints,
 } from '../../input/interfaces/types.js';
-import { prepareFingerprint } from '../../app/pipeline.js';
-import { writeJsonAtomic } from '../../infrastructure/filesystem/files.js';
-import path from 'node:path';
 import type { Runtime } from '../runtime.js';
 
 interface ImportCliOptions {
@@ -88,21 +84,20 @@ export function registerImport(program: Command, runtime: Runtime): void {
     .action(async (file: string, options: ImportCliOptions) => {
       const { project, config, events } = await runtime.context();
       await project.withLock(async () => {
-        const registry = createDefaultRegistry(config.archive);
-        const service = new ImportService(project, registry);
         const absolute = path.resolve(runtime.cwd, file);
-        const detection = await service.detect(absolute).catch(() => undefined);
+        const detection = await detectFile(config, project, absolute).catch(() => undefined);
         const needsRaw = options.raw === true || detection?.format === 'raw';
         const hints = needsRaw ? await collectRawHints(runtime, options) : undefined;
 
-        const report = await service.import(absolute, {
-          ...(hints ? { hints } : {}),
-          ...(options.raw ? { forceRaw: true } : {}),
+        const report = await importIntoProject(project, config, events, absolute, {
+          hints,
+          forceRaw: options.raw === true,
         });
 
         runtime.out.info(`Detected: ${report.detection.description}`);
-        for (const reference of report.references)
+        for (const reference of report.references) {
           runtime.out.success(`Stored reference file ${path.relative(project.root, reference)}`);
+        }
         for (const { record, created } of report.binaries) {
           const m = record.metadata;
           runtime.out.success(
@@ -110,9 +105,6 @@ export function registerImport(program: Command, runtime: Runtime): void {
               (m.entryPoint ? `, entry ${m.entryPoint}` : ''),
           );
           for (const warning of m.warnings) runtime.out.warn(warning);
-          const workflow = new WorkflowManager(project.workflowFile(record.id), record.id, events);
-          await workflow.markCompleted('prepare', prepareFingerprint(record), 'imported');
-          await writeJsonAtomic(path.join(project.analysisDir(record.id), 'metadata.json'), m);
         }
       });
     });
