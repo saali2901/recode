@@ -100,7 +100,7 @@ main() {
     else die "Please install ${missing[*]} and run this installer again."; fi
   fi
 
-  mkdir -p "$DATA_DIR" "$BIN_DIR" 2>/dev/null || run mkdir -p "$DATA_DIR" "$BIN_DIR"
+  run mkdir -p "$DATA_DIR" "$BIN_DIR"
 
   # --- 2. Node.js ---------------------------------------------------------------------------------
   local NODE_BIN="" PRIVATE_NODE=0
