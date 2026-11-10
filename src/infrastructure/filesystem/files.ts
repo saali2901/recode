@@ -26,14 +26,26 @@ export async function renameWithRetry(from: string, to: string): Promise<void> {
   }
 }
 
+export interface AtomicWriteOptions {
+  /**
+   * Flush to disk before the rename (default). Disable only for derived data that is rebuilt or treated as a miss
+   * when found torn after a power loss (cache entries, per-task context files); the rename stays atomic.
+   */
+  durable?: boolean;
+}
+
 /** Writes a file atomically: temp file in the same directory, fsync, rename. */
-export async function writeFileAtomic(filePath: string, data: string | Uint8Array): Promise<void> {
+export async function writeFileAtomic(
+  filePath: string,
+  data: string | Uint8Array,
+  options: AtomicWriteOptions = {},
+): Promise<void> {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   const tmp = `${filePath}.${process.pid}.${randomUUID().slice(0, 8)}.tmp`;
   const handle = await fs.open(tmp, 'w');
   try {
     await handle.writeFile(data);
-    await handle.sync();
+    if (options.durable !== false) await handle.sync();
   } finally {
     await handle.close();
   }
@@ -45,8 +57,12 @@ export async function writeFileAtomic(filePath: string, data: string | Uint8Arra
   }
 }
 
-export async function writeJsonAtomic(filePath: string, value: unknown): Promise<void> {
-  await writeFileAtomic(filePath, `${JSON.stringify(value, null, 2)}\n`);
+export async function writeJsonAtomic(
+  filePath: string,
+  value: unknown,
+  options: AtomicWriteOptions = {},
+): Promise<void> {
+  await writeFileAtomic(filePath, `${JSON.stringify(value, null, 2)}\n`, options);
 }
 
 export async function pathExists(target: string): Promise<boolean> {

@@ -6,6 +6,94 @@ import { pathExists, readJson, writeJsonAtomic } from '../filesystem/files.js';
 
 const GIB = 1024 ** 3;
 
+const TierSchema = z
+  .object({
+    /** Model alias or ID passed to `claude --model`. Empty = Claude Code's default model. */
+    model: z.string().min(1).optional(),
+    /** Maximum number of concurrent sessions that use this tier (model capacity / rate limits). */
+    maxConcurrent: z.number().int().min(1).max(16).optional(),
+    /** Context window of the model in tokens; batches are sized to stay well below it. */
+    contextTokens: z.number().int().min(8_000).optional(),
+    /** Maximum number of function tasks per session at this tier. */
+    batchSize: z.number().int().min(1).max(50).optional(),
+  })
+  .strict();
+
+const RoutingSchema = z
+  .object({
+    /** `auto`: every task gets the tier its measured difficulty needs. `fixed`: one model for everything. */
+    mode: z.enum(['auto', 'fixed']).default('auto'),
+    tiers: z
+      .object({
+        /** Trivial functions: getters, wrappers, tiny arithmetic. */
+        fast: TierSchema.default({ model: 'haiku', contextTokens: 200_000, batchSize: 12 }),
+        /** Ordinary reconstruction. */
+        standard: TierSchema.default({ model: 'sonnet', contextTokens: 200_000 }),
+        /** Complex algorithms, heavy pointer arithmetic, indirect calls, recursion. */
+        advanced: TierSchema.default({ model: 'opus', contextTokens: 200_000, batchSize: 3 }),
+        /** Review and last resort for functions that failed at lower tiers. */
+        expert: TierSchema.default({ model: 'opus', contextTokens: 200_000, batchSize: 1 }),
+      })
+      .strict()
+      .default({
+        fast: { model: 'haiku', contextTokens: 200_000, batchSize: 12 },
+        standard: { model: 'sonnet', contextTokens: 200_000 },
+        advanced: { model: 'opus', contextTokens: 200_000, batchSize: 3 },
+        expert: { model: 'opus', contextTokens: 200_000, batchSize: 1 },
+      }),
+    /** Difficulty score (0-100) from which a function needs the tier. */
+    thresholds: z
+      .object({
+        standard: z.number().min(0).max(100).default(15),
+        advanced: z.number().min(0).max(100).default(45),
+        expert: z.number().min(0).max(100).default(80),
+      })
+      .strict()
+      .default({ standard: 15, advanced: 45, expert: 80 }),
+    /** Check once per day that each configured model answers; unavailable tiers fall back to the next higher one. */
+    verifyModels: z.boolean().default(true),
+    /** Re-run weak results with the next tier, handing over the previous result and findings. */
+    escalation: z.boolean().default(true),
+  })
+  .strict()
+  .default({
+    mode: 'auto',
+    tiers: {
+      fast: { model: 'haiku', contextTokens: 200_000, batchSize: 12 },
+      standard: { model: 'sonnet', contextTokens: 200_000 },
+      advanced: { model: 'opus', contextTokens: 200_000, batchSize: 3 },
+      expert: { model: 'opus', contextTokens: 200_000, batchSize: 1 },
+    },
+    thresholds: { standard: 15, advanced: 45, expert: 80 },
+    verifyModels: true,
+    escalation: true,
+  });
+
+const SchedulerSchema = z
+  .object({
+    /** Dependency handling: see `DependencyMode`. `legacy` reproduces the original sequential behaviour. */
+    mode: z.enum(['adaptive', 'complete', 'signatures', 'legacy']).default('adaptive'),
+    /** Upper bound of concurrent Claude Code sessions. The scheduler adapts between 1 and this value. */
+    maxSessions: z.number().int().min(1).max(16).default(4),
+    /** Concurrency at the start of a run. */
+    initialSessions: z.number().int().min(1).max(16).default(2),
+    /** Largest group of mutually recursive functions handled in one session. */
+    maxGroupSize: z.number().int().min(2).max(100).default(24),
+    /** Stop adding sessions while the 1-minute load average per CPU exceeds this value. */
+    maxLoadPerCpu: z.number().min(0.1).max(4).default(0.9),
+    /** Stop adding sessions while less than this fraction of RAM is free. */
+    minFreeMemoryFraction: z.number().min(0).max(0.9).default(0.1),
+  })
+  .strict()
+  .default({
+    mode: 'adaptive',
+    maxSessions: 4,
+    initialSessions: 2,
+    maxGroupSize: 24,
+    maxLoadPerCpu: 0.9,
+    minFreeMemoryFraction: 0.1,
+  });
+
 export const ConfigSchema = z
   .object({
     tools: z
@@ -49,9 +137,34 @@ export const ConfigSchema = z
       .object({
         analysisTimeoutSeconds: z.number().int().min(30).default(1800),
         maxFunctions: z.number().int().min(1).default(20_000),
+        /**
+         * Decompiler threads inside Ghidra's export script (one decompiler process per thread). 1 = the original
+         * sequential export. Values above 1 are experimental: the Java path was not run against a real Ghidra.
+         */
+        decompilerThreads: z.number().int().min(1).max(16).default(1),
       })
       .strict()
-      .default({ analysisTimeoutSeconds: 1800, maxFunctions: 20_000 }),
+      .default({ analysisTimeoutSeconds: 1800, maxFunctions: 20_000, decompilerThreads: 1 }),
+    routing: RoutingSchema,
+    scheduler: SchedulerSchema,
+    cache: z
+      .object({
+        /** Reuse accepted reconstructions across runs and re-analyses (content-addressed). */
+        enabled: z.boolean().default(true),
+      })
+      .strict()
+      .default({ enabled: true }),
+    validation: z
+      .object({
+        /** Compile every accepted function on its own (syntax only) before the full build. */
+        compileCheck: z.enum(['auto', 'off']).default('auto'),
+        /** Build -> targeted repair rounds that `recode run` performs after the first build. */
+        autoRepairRounds: z.number().int().min(0).max(5).default(2),
+        /** JSON file describing a differential test against reference code (see docs/validation.md). */
+        differentialSpec: z.string().min(1).optional(),
+      })
+      .strict()
+      .default({ compileCheck: 'auto', autoRepairRounds: 2 }),
     archive: z
       .object({
         maxFiles: z.number().int().min(1).default(1000),

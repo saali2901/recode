@@ -17,7 +17,13 @@ export default tseslint.config(
     // Test doubles for external CLIs run as plain Node scripts.
     files: ['test/helpers/*.mjs', 'scripts/*.mjs'],
     languageOptions: {
-      globals: { process: 'readonly', console: 'readonly', setInterval: 'readonly' },
+      globals: {
+        process: 'readonly',
+        console: 'readonly',
+        setInterval: 'readonly',
+        setTimeout: 'readonly',
+        performance: 'readonly',
+      },
     },
   },
   {

@@ -32,7 +32,10 @@ export interface World {
     options?: { cwd?: string; overrides?: Runtime['overrides']; signal?: AbortSignal },
   ): Promise<CliRun>;
   setEnv(name: string, value: string | undefined): void;
+  /** Reconstruction/review sessions (model availability probes excluded). */
   claudeInvocations(): Promise<Array<{ args: string[]; prompt: string; cwd: string }>>;
+  /** Model availability probes of the router. */
+  claudeProbes(): Promise<Array<{ args: string[]; prompt: string; cwd: string }>>;
 }
 
 /**
@@ -85,7 +88,16 @@ export async function createWorld(options: { project?: boolean } = {}): Promise<
         .split('\n')
         .filter(Boolean)
         .map((line) => JSON.parse(line) as { args: string[]; prompt: string; cwd: string })
-        .filter((entry) => entry.args.includes('--print'));
+        .filter((entry) => entry.args.includes('--print'))
+        .filter((entry) => !entry.prompt.includes('Reply with the single word'));
+    },
+    async claudeProbes() {
+      const text = await fs.readFile(claudeLog, 'utf8').catch(() => '');
+      return text
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as { args: string[]; prompt: string; cwd: string })
+        .filter((entry) => entry.prompt.includes('Reply with the single word'));
     },
   };
 

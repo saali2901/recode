@@ -205,6 +205,50 @@ export async function buildStep(
   return { ...result, ...(report ? { report } : {}) };
 }
 
+export interface RepairLoopResult {
+  rounds: number;
+  build: BuildStepResult;
+}
+
+/**
+ * Builds the project; while the build fails with errors attributable to single functions, sends exactly those
+ * functions back to the agents (one tier stronger than before, with the compiler output) and rebuilds. The build is
+ * incremental: unchanged generated files keep their timestamps, so only the repaired sources are recompiled.
+ * Stops after `validation.autoRepairRounds` rounds or when a round fixes nothing.
+ */
+export async function buildWithRepairs(
+  deps: PipelineDeps,
+  binary: BinaryRecord,
+): Promise<RepairLoopResult> {
+  const rounds = deps.config.validation.autoRepairRounds;
+  let round = 0;
+  for (;;) {
+    try {
+      return {
+        rounds: round,
+        build: await buildStep(deps, binary, round > 0 ? { force: true } : {}),
+      };
+    } catch (error) {
+      const retryable = error instanceof RecodeError && error.code === 'TOOL_FAILED';
+      if (!retryable || round >= rounds || deps.signal?.aborted) throw error;
+      const diagnostics = await readJsonIfExists(
+        path.join(deps.project.buildDir(binary.id), 'build-report.json'),
+        z.object({
+          diagnostics: z.array(z.object({ severity: z.string(), taskId: z.string().optional() })),
+        }),
+      );
+      const attributable = diagnostics?.diagnostics.some((d) => d.severity === 'error' && d.taskId);
+      if (!attributable) throw error;
+      round++;
+      deps.events.emit({
+        type: 'info',
+        message: `Build failed; repair round ${round} of ${rounds}: sending the affected functions back to the agents.`,
+      });
+      await reconstructStep(deps, binary, { repair: true });
+    }
+  }
+}
+
 export interface ValidateStepResult extends RunStepResult {
   report?: ValidationReport;
 }

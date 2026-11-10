@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { RecodeError } from '../../src/core/errors/index.js';
 import { EventBus, type RecodeEvent } from '../../src/core/events/event-bus.js';
 import { Project } from '../../src/core/project/project.js';
-import { TaskStore, type Task } from '../../src/core/tasks/task-store.js';
+import { TaskStore, makeTask, type Task } from '../../src/core/tasks/task-store.js';
 import { WorkflowManager } from '../../src/core/workflow/workflow.js';
 import { writeJsonAtomic } from '../../src/infrastructure/filesystem/files.js';
 import type { BinaryMetadata } from '../../src/input/interfaces/types.js';
@@ -201,14 +201,8 @@ describe('WorkflowManager', () => {
 });
 
 describe('TaskStore', () => {
-  const task = (id: string, dependsOn: string[] = []): Task => ({
-    id,
-    kind: 'function',
-    title: id,
-    dependsOn,
-    status: 'pending',
-    attempts: 0,
-  });
+  const task = (id: string, dependsOn: string[] = []): Task =>
+    makeTask({ id, kind: 'function', title: id, dependsOn });
 
   async function store() {
     const dir = await makeTempDir();
