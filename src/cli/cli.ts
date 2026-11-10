@@ -6,6 +6,7 @@ import { registerImport } from './commands/import.js';
 import { registerInit } from './commands/init.js';
 import { registerInspect } from './commands/inspect.js';
 import { registerLogs } from './commands/logs.js';
+import { registerPerf } from './commands/perf.js';
 import { registerSetup } from './commands/setup.js';
 import { registerStatus } from './commands/status.js';
 import { registerTrust } from './commands/trust.js';
@@ -57,6 +58,7 @@ export function buildProgram(
   registerInspect(program, runtime);
   registerStepCommands(program, runtime);
   registerStatus(program, runtime);
+  registerPerf(program, runtime);
   registerLogs(program, runtime);
   registerDoctor(program, runtime);
   registerConfig(program, runtime);

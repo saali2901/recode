@@ -288,7 +288,7 @@ describe('validation checks', () => {
   it('does not invent compile results without a build', () => {
     const checks = evaluate();
     expect(
-      checks.filter((c) => c.level === 'syntactic' || c.level === 'compiled').map((c) => c.outcome),
+      checks.filter((c) => c.id === 'syntax' || c.id === 'compile').map((c) => c.outcome),
     ).toEqual(['not-assessed', 'not-assessed']);
   });
 

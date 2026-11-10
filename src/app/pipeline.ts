@@ -6,6 +6,7 @@ import {
   type ReconstructOptions,
   type ReconstructSummary,
 } from '../ai/orchestration/reconstruct.js';
+import { metricsDir } from '../ai/orchestration/reconstruct.js';
 import { reviewReconstruction } from '../ai/orchestration/review.js';
 import { createClaudeSessionRunner, type SessionRunner } from '../ai/orchestration/session.js';
 import { RecodeError } from '../core/errors/index.js';
@@ -90,6 +91,7 @@ export async function analyzeStep(
     execute: async () => {
       if (!deps.skipPrerequisites) await requireTools(config, ['java']);
       const outputDirectory = project.analysisDir(binary.id);
+      const ghidraStarted = performance.now();
       const summary = await decompiler.analyze({
         binaryPath: project.binaryPath(binary),
         metadata: binary.metadata,
@@ -98,9 +100,20 @@ export async function analyzeStep(
         logFile: path.join(project.paths.logs, `analyze-${binary.id}.log`),
         timeoutSeconds: config.ghidra.analysisTimeoutSeconds,
         maxFunctions: config.ghidra.maxFunctions,
+        decompilerThreads: config.ghidra.decompilerThreads,
         ...(deps.signal ? { signal: deps.signal } : {}),
       });
       await writeJsonAtomic(path.join(outputDirectory, 'metadata.json'), binary.metadata);
+      await writeJsonAtomic(path.join(metricsDir(project, binary.id), 'analysis.json'), {
+        at: new Date().toISOString(),
+        tool: summary.tool,
+        toolVersion: summary.toolVersion,
+        ghidraMs: Math.round(performance.now() - ghidraStarted),
+        decompilerThreads: config.ghidra.decompilerThreads,
+        functions: summary.functionCount,
+        decompiled: summary.decompiledCount,
+        failedFunctions: summary.failedFunctions,
+      });
       for (const message of summary.warnings) deps.events.emit({ type: 'warning', message });
       return {
         summary: `${summary.tool} ${summary.toolVersion}: ${summary.functionCount} functions, ${summary.decompiledCount} decompiled`,
@@ -249,6 +262,18 @@ export async function buildWithRepairs(
   }
 }
 
+/** The reference source a differential spec points at (part of the validate fingerprint). */
+async function referencedSources(root: string, spec: string): Promise<string[]> {
+  try {
+    const parsed = JSON.parse(await fs.readFile(path.join(root, spec), 'utf8')) as {
+      referenceSource?: unknown;
+    };
+    return typeof parsed.referenceSource === 'string' ? [parsed.referenceSource] : [];
+  } catch {
+    return [];
+  }
+}
+
 export interface ValidateStepResult extends RunStepResult {
   report?: ValidationReport;
 }
@@ -268,8 +293,12 @@ export async function validateStep(
     path.join(project.buildDir(binary.id), 'build-report.json'),
     z.unknown(),
   );
+  const spec = config.validation.differentialSpec;
+  const specHash = spec
+    ? await hashFiles(project.root, [spec, ...(await referencedSources(project.root, spec))])
+    : '-';
   const fingerprint = sha256Text(
-    `validate:${options.aiReview ? 'review' : 'plain'}:${await hashFiles(project.reconstructionDir(binary.id), inputs)}:${JSON.stringify(buildReport)}`,
+    `validate:${options.aiReview ? 'review' : 'plain'}:${specHash}:${await hashFiles(project.reconstructionDir(binary.id), inputs)}:${JSON.stringify(buildReport)}`,
   );
   let report: ValidationReport | undefined;
   const result = await workflowFor(deps, binary).runStep({
@@ -301,6 +330,8 @@ export async function validateStep(
         project,
         binary,
         includeReviews: options.aiReview === true,
+        config,
+        signal: deps.signal,
       });
       const failed = report.checks.filter((c) => c.outcome === 'failed').length;
       const passed = report.checks.filter((c) => c.outcome === 'passed').length;

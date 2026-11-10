@@ -62,7 +62,8 @@ describe('Ghidra adapter (against a command-line compatible fake)', () => {
       ]),
     );
     expect(args).not.toContain('-loader'); // ELF: Ghidra's own loader picks language
-    expect(args.slice(-1)).toEqual(['-']); // no entry override for non-raw binaries
+    // last arguments: entry (no override for non-raw binaries) and the decompiler thread count
+    expect(args.slice(-2)).toEqual(['-', '1']);
   });
 
   it('passes loader, base address, language and entry for raw binaries', async () => {
@@ -96,7 +97,7 @@ describe('Ghidra adapter (against a command-line compatible fake)', () => {
       '-processor',
       'ARM:LE:32:v8',
     ]);
-    expect(args.slice(-1)).toEqual(['0x8010']);
+    expect(args.slice(-2)).toEqual(['0x8010', '1']);
   });
 
   it('imports a GameCube ISO and builds the DOL memory-map import for Ghidra', async () => {
@@ -114,7 +115,7 @@ describe('Ghidra adapter (against a command-line compatible fake)', () => {
     const pre = args.indexOf('-preScript');
     expect(args.slice(pre, pre + 3)).toEqual(['-preScript', 'ImportDol.java', '0x80003100']);
     expect(args).toContain('PowerPC:BE:32:default');
-    expect(args.slice(-1)).toEqual(['0x80003100']);
+    expect(args.slice(-2)).toEqual(['0x80003100', '1']);
   });
 
   it('bundles the DOL import script', async () => {
