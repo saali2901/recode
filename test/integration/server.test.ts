@@ -316,6 +316,20 @@ describe('jobs', () => {
       .tasks;
     expect(tasks).toHaveLength(8);
     expect(tasks.find((t: any) => t.kind === 'types').status).toBe('completed');
+    expect(tasks.find((t: any) => t.kind === 'types')).toMatchObject({ tier: 'advanced' });
+    expect(tasks.find((t: any) => t.title.startsWith('add_ints'))).toMatchObject({
+      tier: 'fast',
+      escalations: 0,
+      fromCache: false,
+      openIssues: [],
+    });
+
+    const perf = (await api.call('GET', `/api/projects/proj/binaries/${binary.id}/perf`)).json;
+    expect(perf).toMatchObject({ mode: 'adaptive', summary: { accepted: 8, failed: 0 } });
+    expect(perf.summary.perModel.map((m: any) => m.tier)).toEqual(
+      expect.arrayContaining(['fast', 'advanced']),
+    );
+    expect(perf.analysis).toMatchObject({ functions: 6 });
 
     const validation = (
       await api.call('GET', `/api/projects/proj/binaries/${binary.id}/validation`)
@@ -408,6 +422,48 @@ describe('jobs', () => {
     expect((await start(api, { step: 'analyze', binaryId: 'nope' })).status).toBe(400);
     expect((await api.call('GET', '/api/projects/proj/binaries/nope/tasks')).status).toBe(404);
     expect((await api.call('GET', '/api/projects/proj/binaries/x/validation')).status).toBe(404);
+    expect((await api.call('GET', '/api/projects/proj/binaries/x/perf')).status).toBe(404);
+    const binaryId = (await api.call('GET', '/api/projects/proj')).json.binaries[0].id;
+    expect((await api.call('GET', `/api/projects/proj/binaries/${binaryId}/perf`)).status).toBe(
+      404,
+    );
+    expect(
+      (await start(api, { step: 'reconstruct', options: { dependencies: 'sideways' } })).status,
+    ).toBe(400);
+    expect((await start(api, { step: 'reconstruct', options: { sessions: 99 } })).status).toBe(400);
+    expect((await start(api, { step: 'reconstruct', options: { surprise: true } })).status).toBe(
+      400,
+    );
+  });
+
+  it('applies per-run scheduler options and the cache switch to a reconstruct job', async () => {
+    const api = await setup();
+    await importSample(api);
+    expect((await start(api, { step: 'analyze' })).status).toBe(202);
+    await api.waitForJob();
+    const options = { sessions: 1, dependencies: 'complete' };
+    expect((await start(api, { step: 'reconstruct', options })).status).toBe(202);
+    expect((await api.waitForJob()).status).toBe('completed');
+    const id = (await api.call('GET', '/api/projects/proj')).json.binaries[0].id;
+    const first = (await api.call('GET', `/api/projects/proj/binaries/${id}/perf`)).json;
+    expect(first).toMatchObject({ mode: 'complete' });
+    expect(first.summary.workersMax).toBe(1);
+
+    // a forced run with the cache switched off asks the model again
+    const sessionsBefore = first.summary.modelCalls;
+    expect(
+      (
+        await start(api, {
+          step: 'reconstruct',
+          force: true,
+          options: { ...options, noCache: true },
+        })
+      ).status,
+    ).toBe(202);
+    await api.waitForJob();
+    const again = (await api.call('GET', `/api/projects/proj/binaries/${id}/perf`)).json;
+    expect(again.summary.modelCalls).toBe(0); // tasks were complete, nothing was queued
+    expect(sessionsBefore).toBeGreaterThan(0);
   });
 });
 
@@ -416,6 +472,18 @@ describe('settings and doctor', () => {
     const api = await setup();
     const initial = (await api.call('GET', '/api/config?project=proj')).json;
     expect(initial.effective.claude.maxParallelAgents).toBe(2);
+    // the performance settings are part of the effective configuration, so the settings page lists them
+    expect(initial.effective.routing.tiers.advanced.model).toBe('opus');
+    expect(initial.effective.scheduler).toMatchObject({ mode: 'adaptive', maxSessions: 4 });
+    expect(
+      (
+        await api.call('PUT', '/api/config?project=proj', {
+          scope: 'project',
+          key: 'routing.tiers.expert.model',
+          value: 'my-model',
+        })
+      ).json.effective.routing.tiers.expert,
+    ).toMatchObject({ model: 'my-model', batchSize: 1 });
     expect(
       (
         await api.call('PUT', '/api/config?project=proj', {

@@ -1,26 +1,17 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { Command } from 'commander';
-import { z } from 'zod';
 import { metricsDir } from '../../ai/orchestration/reconstruct.js';
 import { RecodeError } from '../../core/errors/index.js';
 import { pathExists, readJsonIfExists } from '../../infrastructure/filesystem/files.js';
 import {
+  AnalysisTimingSchema,
   compareRuns,
   loadRun,
   summarize,
   type RunMetrics,
 } from '../../infrastructure/monitoring/run-metrics.js';
 import type { Runtime } from '../runtime.js';
-
-const AnalysisTimingSchema = z.object({
-  ghidraMs: z.number(),
-  decompilerThreads: z.number(),
-  functions: z.number(),
-  decompiled: z.number(),
-  failedFunctions: z.number(),
-  toolVersion: z.string(),
-});
 
 async function listRuns(directory: string): Promise<string[]> {
   if (!(await pathExists(directory))) return [];

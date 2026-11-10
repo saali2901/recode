@@ -39,6 +39,31 @@ export interface PipelineDeps {
   skipPrerequisites?: boolean | undefined;
 }
 
+export const DEPENDENCY_MODES = ['adaptive', 'complete', 'signatures', 'legacy'] as const;
+
+/** Per-run overrides of the scheduler settings (CLI flags and the web interface share them). */
+export interface RunTuning {
+  parallel?: number | undefined;
+  batchSize?: number | undefined;
+  sessions?: number | undefined;
+  dependencies?: (typeof DEPENDENCY_MODES)[number] | undefined;
+  legacy?: boolean | undefined;
+}
+
+/** Returns a copy of the configuration with the per-run overrides applied. */
+export function applyTuning(config: RecodeConfig, tuning: RunTuning): RecodeConfig {
+  const next = structuredClone(config);
+  if (tuning.parallel !== undefined) next.claude.maxParallelAgents = tuning.parallel;
+  if (tuning.batchSize !== undefined) next.claude.batchSize = tuning.batchSize;
+  if (tuning.sessions !== undefined) {
+    next.scheduler.maxSessions = tuning.sessions;
+    next.scheduler.initialSessions = Math.min(next.scheduler.initialSessions, tuning.sessions);
+  }
+  if (tuning.dependencies !== undefined) next.scheduler.mode = tuning.dependencies;
+  if (tuning.legacy) next.scheduler.mode = 'legacy';
+  return next;
+}
+
 export function workflowFor(deps: PipelineDeps, binary: BinaryRecord): WorkflowManager {
   return new WorkflowManager(deps.project.workflowFile(binary.id), binary.id, deps.events);
 }

@@ -14,6 +14,12 @@ import { initProject, PROJECT_NAME_PATTERN } from '../app/init-project.js';
 import { toRecodeError, type RecodeError } from '../core/errors/index.js';
 import { EventBus } from '../core/events/event-bus.js';
 import { Project, MANIFEST_FILE } from '../core/project/project.js';
+import { metricsDir } from '../ai/orchestration/reconstruct.js';
+import {
+  AnalysisTimingSchema,
+  loadRun,
+  summarize,
+} from '../infrastructure/monitoring/run-metrics.js';
 import { TaskFileSchema } from '../core/tasks/task-store.js';
 import { WorkflowStateSchema } from '../core/workflow/workflow.js';
 import {
@@ -308,7 +314,29 @@ export async function startServer(options: ServerOptions = {}): Promise<RunningS
             status: t.status,
             attempts: t.attempts,
             lastError: t.lastError ?? null,
+            tier: t.tier ?? null,
+            escalations: t.history.filter((h) => h.outcome === 'escalated').length,
+            fromCache: t.fromCache === true,
+            openIssues: t.openIssues,
           })),
+        });
+      }
+      if (leaf === 'perf' && method === 'GET') {
+        const dir = metricsDir(project, binary.id);
+        const run = await loadRun(dir, 'latest');
+        if (!run) throw new HttpError(404, 'No reconstruction run recorded yet.', 'NOT_FOUND');
+        const analysis = await readJsonIfExists(
+          path.join(dir, 'analysis.json'),
+          AnalysisTimingSchema,
+        ).catch(() => undefined);
+        return sendJson(res, 200, {
+          runId: run.runId,
+          mode: run.mode,
+          summary: summarize(run),
+          counters: run.counters,
+          phases: run.phases,
+          planStats: run.planStats,
+          analysis: analysis ?? null,
         });
       }
       if (leaf === 'validation' && method === 'GET') {

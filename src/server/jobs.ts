@@ -2,7 +2,9 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import {
+  DEPENDENCY_MODES,
   analyzeStep,
+  applyTuning,
   buildStep,
   buildWithRepairs,
   reconstructStep,
@@ -22,6 +24,16 @@ export const JobRequestSchema = z.object({
   binaryId: z.string().min(1).optional(),
   force: z.boolean().optional(),
   aiReview: z.boolean().optional(),
+  /** Per-run scheduler overrides, same meaning as the CLI flags of "recode reconstruct". */
+  options: z
+    .object({
+      sessions: z.number().int().min(1).max(16).optional(),
+      dependencies: z.enum(DEPENDENCY_MODES).optional(),
+      legacy: z.boolean().optional(),
+      noCache: z.boolean().optional(),
+    })
+    .strict()
+    .optional(),
 });
 export type JobRequest = z.infer<typeof JobRequestSchema>;
 
@@ -78,7 +90,10 @@ export class JobManager {
       throw new RecodeError('WORKFLOW', `A job is already running (${this.current.step}).`);
     }
     const binary = project.resolveBinary(request.binaryId);
-    const config = await loadConfig({ projectLayer: project.configLayer });
+    const config = applyTuning(
+      await loadConfig({ projectLayer: project.configLayer }),
+      request.options ?? {},
+    );
     const controller = new AbortController();
     const events = new EventBus();
     events.subscribe((event) => this.log.push('event', event));
@@ -148,7 +163,11 @@ async function executeSteps(
 
   if (wants('analyze')) note('analyze', (await analyzeStep(deps, binary, { force })).summary);
   if (wants('reconstruct')) {
-    note('reconstruct', (await reconstructStep(deps, binary, { force })).summary);
+    note(
+      'reconstruct',
+      (await reconstructStep(deps, binary, { force, noCache: request.options?.noCache === true }))
+        .summary,
+    );
   }
   if (wants('build')) {
     // The full workflow repairs functions with build errors in a few targeted rounds; a single build step does not.

@@ -27,3 +27,7 @@ export function estimateRemaining(
   if (completed < 1 || total <= completed || elapsedMs <= 0) return undefined;
   return (elapsedMs / completed) * (total - completed);
 }
+
+export function formatCount(value: number): string {
+  return value.toLocaleString('en-US');
+}

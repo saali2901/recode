@@ -68,6 +68,16 @@ export const RunMetricsSchema = z.object({
 });
 export type RunMetrics = z.infer<typeof RunMetricsSchema>;
 
+/** Timing of the Ghidra step, written next to the run files by the analyze step. */
+export const AnalysisTimingSchema = z.object({
+  ghidraMs: z.number(),
+  decompilerThreads: z.number(),
+  functions: z.number(),
+  decompiled: z.number(),
+  failedFunctions: z.number(),
+  toolVersion: z.string(),
+});
+
 export class MetricsCollector {
   readonly counters = {
     accepted: 0,

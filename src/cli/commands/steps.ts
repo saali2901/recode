@@ -5,6 +5,8 @@ import { ValidationReportSchema } from '../report-schema.js';
 import {
   analyzeStep,
   buildStep,
+  DEPENDENCY_MODES,
+  applyTuning,
   buildWithRepairs,
   reconstructStep,
   validateStep,
@@ -22,30 +24,27 @@ interface TuningOptions {
   legacy?: boolean;
 }
 
-const DEPENDENCY_MODES = ['adaptive', 'complete', 'signatures', 'legacy'] as const;
-
 async function pipelineDeps(runtime: Runtime, overrides: TuningOptions = {}) {
   const context = await runtime.context();
-  const config = structuredClone(context.config);
-  if (overrides.parallel) config.claude.maxParallelAgents = Number.parseInt(overrides.parallel, 10);
-  if (overrides.batchSize) config.claude.batchSize = Number.parseInt(overrides.batchSize, 10);
-  if (overrides.sessions) {
-    const n = Number.parseInt(overrides.sessions, 10);
-    config.scheduler.maxSessions = n;
-    config.scheduler.initialSessions = Math.min(config.scheduler.initialSessions, n);
+  const mode = overrides.dependencies
+    ? DEPENDENCY_MODES.find((m) => m === overrides.dependencies)
+    : undefined;
+  if (overrides.dependencies && !mode) {
+    throw new RecodeError(
+      'INVALID_INPUT',
+      `Unknown --dependencies mode "${overrides.dependencies}".`,
+      { hint: `Use one of: ${DEPENDENCY_MODES.join(', ')}.` },
+    );
   }
-  if (overrides.dependencies) {
-    const mode = DEPENDENCY_MODES.find((m) => m === overrides.dependencies);
-    if (!mode) {
-      throw new RecodeError(
-        'INVALID_INPUT',
-        `Unknown --dependencies mode "${overrides.dependencies}".`,
-        { hint: `Use one of: ${DEPENDENCY_MODES.join(', ')}.` },
-      );
-    }
-    config.scheduler.mode = mode;
-  }
-  if (overrides.legacy) config.scheduler.mode = 'legacy';
+  const number = (text: string | undefined): number | undefined =>
+    text === undefined ? undefined : Number.parseInt(text, 10);
+  const config = applyTuning(context.config, {
+    parallel: number(overrides.parallel),
+    batchSize: number(overrides.batchSize),
+    sessions: number(overrides.sessions),
+    dependencies: mode,
+    legacy: overrides.legacy,
+  });
   const deps: PipelineDeps = {
     project: context.project,
     config,
