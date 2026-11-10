@@ -268,43 +268,47 @@ describe('ImportPanel', () => {
 
 describe('ReconstructPanel', () => {
   beforeEach(() => {
-    vi.spyOn(apiModule.api, 'get').mockResolvedValue({
-      tasks: [
-        {
-          id: 'overview',
-          kind: 'overview',
-          title: 'Binary overview',
-          status: 'completed',
-          attempts: 1,
-          lastError: null,
-        },
-        {
-          id: 'types',
-          kind: 'types',
-          title: 'Shared data structures',
-          status: 'completed',
-          attempts: 1,
-          lastError: null,
-        },
-        {
-          id: 'fn_1',
-          kind: 'function',
-          title: 'add_ints @ 0x1',
-          status: 'running',
-          attempts: 1,
-          lastError: null,
-        },
-        {
-          id: 'fn_2',
-          kind: 'function',
-          title: 'main @ 0x2',
-          status: 'pending',
-          attempts: 0,
-          lastError: null,
-        },
-      ],
+    vi.spyOn(apiModule.api, 'get').mockImplementation(async (path: string) => {
+      if (path.endsWith('/perf')) throw new ApiError(404, 'NOT_FOUND', 'No run yet.');
+      return TASKS;
     });
   });
+  const TASKS = {
+    tasks: [
+      {
+        id: 'overview',
+        kind: 'overview',
+        title: 'Binary overview',
+        status: 'completed',
+        attempts: 1,
+        lastError: null,
+      },
+      {
+        id: 'types',
+        kind: 'types',
+        title: 'Shared data structures',
+        status: 'completed',
+        attempts: 1,
+        lastError: null,
+      },
+      {
+        id: 'fn_1',
+        kind: 'function',
+        title: 'add_ints @ 0x1',
+        status: 'running',
+        attempts: 1,
+        lastError: null,
+      },
+      {
+        id: 'fn_2',
+        kind: 'function',
+        title: 'main @ 0x2',
+        status: 'pending',
+        attempts: 0,
+        lastError: null,
+      },
+    ],
+  };
   const binary = {
     id: 'b',
     steps: {
@@ -369,9 +373,122 @@ describe('ReconstructPanel', () => {
       step: 'reconstruct',
       binaryId: 'b',
       force: true,
+      options: {},
     });
   });
+
+  it('sends per-run scheduler options with the job', async () => {
+    const post = vi.spyOn(apiModule.api, 'post').mockResolvedValue({});
+    render(
+      <ReconstructPanel
+        project="p"
+        binary={binary}
+        stream={initialStream}
+        busy={false}
+        onStarted={() => undefined}
+      />,
+    );
+    await userEvent.type(await screen.findByLabelText('Concurrent sessions (maximum)'), '3');
+    await userEvent.selectOptions(screen.getByLabelText('Function dependencies'), 'complete');
+    await userEvent.click(screen.getByLabelText('Ignore the result cache in this run'));
+    await userEvent.click(screen.getByRole('button', { name: /^(Start|Resume|Re-?run)/ }));
+    expect(post).toHaveBeenCalledWith('/api/projects/p/jobs', {
+      step: 'reconstruct',
+      binaryId: 'b',
+      force: false,
+      options: { sessions: 3, dependencies: 'complete', noCache: true },
+    });
+  });
+
+  it('shows the tier, escalations and cache use of every task', () => {
+    render(
+      <TaskList
+        tasks={[
+          {
+            id: 'fn_1',
+            kind: 'function',
+            title: 'a @ 0x1',
+            status: 'completed',
+            attempts: 2,
+            lastError: null,
+            tier: 'standard',
+            escalations: 1,
+          },
+          {
+            id: 'fn_2',
+            kind: 'function',
+            title: 'b @ 0x2',
+            status: 'completed',
+            attempts: 1,
+            lastError: null,
+            tier: 'fast',
+            fromCache: true,
+            openIssues: ['loops-dropped: x'],
+          },
+        ]}
+      />,
+    );
+    expect(screen.getByText('standard')).toBeTruthy();
+    expect(screen.getByText(/↑1/)).toBeTruthy();
+    expect(screen.getByText(/\(cache\)/)).toBeTruthy();
+    expect(screen.getByText(/Open findings: loops-dropped: x/)).toBeTruthy();
+  });
+
+  it('shows the metrics of the last run when the server has them', async () => {
+    vi.spyOn(apiModule.api, 'get').mockImplementation(async (path: string) => {
+      if (path.endsWith('/perf')) return PERF;
+      return TASKS;
+    });
+    render(
+      <ReconstructPanel
+        project="p"
+        binary={binary}
+        stream={initialStream}
+        busy={false}
+        onStarted={() => undefined}
+      />,
+    );
+    expect(await screen.findByText('Run r1', { exact: false })).toBeTruthy();
+    expect(screen.getByText('4 / 1')).toBeTruthy(); // max / average sessions
+    expect(screen.getByText('75 %')).toBeTruthy(); // cache hit rate
+    expect(screen.getByText('opus')).toBeTruthy();
+  });
 });
+
+const PERF = {
+  runId: 'r1',
+  mode: 'adaptive',
+  counters: {},
+  phases: {},
+  analysis: null,
+  summary: {
+    wallSeconds: 12,
+    modelCalls: 5,
+    inputTokens: 1000,
+    outputTokens: 200,
+    costUsd: 0,
+    perModel: [
+      {
+        tier: 'advanced',
+        model: 'opus',
+        calls: 2,
+        seconds: 8,
+        inputTokens: 600,
+        outputTokens: 120,
+        failures: 0,
+      },
+    ],
+    meanQueueWaitSeconds: 0.5,
+    cacheHitRate: 0.75,
+    workersMax: 4,
+    workersAverage: 1,
+    retries: 0,
+    escalations: 2,
+    accepted: 9,
+    failed: 1,
+    compileErrors: 3,
+  },
+};
 
 describe('JobStatus errors', () => {
   const failed = (patch: object) => ({

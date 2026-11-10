@@ -7,6 +7,14 @@ import type { Runtime } from '../../src/cli/runtime.js';
 import { MOCK_CLAUDE, installFakeGhidra } from './tools.js';
 import { makeTempDir } from './tmp.js';
 
+export interface Invocation {
+  args: string[];
+  prompt: string;
+  cwd: string;
+  /** Value of CLAUDE_CODE_SUBAGENT_MODEL the process saw. */
+  subagentModel: string | null;
+}
+
 export interface CliRun {
   code: number;
   stdout: string;
@@ -32,7 +40,10 @@ export interface World {
     options?: { cwd?: string; overrides?: Runtime['overrides']; signal?: AbortSignal },
   ): Promise<CliRun>;
   setEnv(name: string, value: string | undefined): void;
-  claudeInvocations(): Promise<Array<{ args: string[]; prompt: string; cwd: string }>>;
+  /** Reconstruction/review sessions (model availability probes excluded). */
+  claudeInvocations(): Promise<Invocation[]>;
+  /** Model availability probes of the router. */
+  claudeProbes(): Promise<Invocation[]>;
 }
 
 /**
@@ -84,8 +95,17 @@ export async function createWorld(options: { project?: boolean } = {}): Promise<
       return text
         .split('\n')
         .filter(Boolean)
-        .map((line) => JSON.parse(line) as { args: string[]; prompt: string; cwd: string })
-        .filter((entry) => entry.args.includes('--print'));
+        .map((line) => JSON.parse(line) as Invocation)
+        .filter((entry) => entry.args.includes('--print'))
+        .filter((entry) => !entry.prompt.includes('Reply with the single word'));
+    },
+    async claudeProbes() {
+      const text = await fs.readFile(claudeLog, 'utf8').catch(() => '');
+      return text
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as Invocation)
+        .filter((entry) => entry.prompt.includes('Reply with the single word'));
     },
   };
 

@@ -1,10 +1,13 @@
 import type { Command } from 'commander';
-import { ExitCode } from '../../core/errors/index.js';
+import { ExitCode, RecodeError } from '../../core/errors/index.js';
 import { readJson } from '../../infrastructure/filesystem/files.js';
 import { ValidationReportSchema } from '../report-schema.js';
 import {
   analyzeStep,
   buildStep,
+  DEPENDENCY_MODES,
+  applyTuning,
+  buildWithRepairs,
   reconstructStep,
   validateStep,
   type PipelineDeps,
@@ -13,14 +16,35 @@ import { validationReportPath } from '../../validation/comparison/validate.js';
 import type { ValidationReport } from '../../validation/interfaces.js';
 import type { Runtime } from '../runtime.js';
 
-async function pipelineDeps(
-  runtime: Runtime,
-  overrides: { parallel?: string; batchSize?: string } = {},
-) {
+interface TuningOptions {
+  parallel?: string;
+  batchSize?: string;
+  sessions?: string;
+  dependencies?: string;
+  legacy?: boolean;
+}
+
+async function pipelineDeps(runtime: Runtime, overrides: TuningOptions = {}) {
   const context = await runtime.context();
-  const config = structuredClone(context.config);
-  if (overrides.parallel) config.claude.maxParallelAgents = Number.parseInt(overrides.parallel, 10);
-  if (overrides.batchSize) config.claude.batchSize = Number.parseInt(overrides.batchSize, 10);
+  const mode = overrides.dependencies
+    ? DEPENDENCY_MODES.find((m) => m === overrides.dependencies)
+    : undefined;
+  if (overrides.dependencies && !mode) {
+    throw new RecodeError(
+      'INVALID_INPUT',
+      `Unknown --dependencies mode "${overrides.dependencies}".`,
+      { hint: `Use one of: ${DEPENDENCY_MODES.join(', ')}.` },
+    );
+  }
+  const number = (text: string | undefined): number | undefined =>
+    text === undefined ? undefined : Number.parseInt(text, 10);
+  const config = applyTuning(context.config, {
+    parallel: number(overrides.parallel),
+    batchSize: number(overrides.batchSize),
+    sessions: number(overrides.sessions),
+    dependencies: mode,
+    legacy: overrides.legacy,
+  });
   const deps: PipelineDeps = {
     project: context.project,
     config,
@@ -71,17 +95,28 @@ export function registerStepCommands(program: Command, runtime: Runtime): void {
       'send functions with compiler errors from the last build back to the agents',
     )
     .option('--retry-failed', 'give permanently failed tasks new attempts')
+    .option('--no-cache', 'do not reuse results from the persistent cache in this run')
     .option('--parallel <n>', 'maximum number of concurrent subagents (default from config: 2)')
     .option('--batch-size <n>', 'functions per lead-agent session (default from config: 6)')
+    .option(
+      '--sessions <n>',
+      'maximum number of concurrent Claude Code sessions (default from config: 4)',
+    )
+    .option(
+      '--dependencies <mode>',
+      'how calls order the work: adaptive (default), complete, signatures, legacy',
+    )
+    .option('--legacy', 'original behaviour: one session at a time, one model, no routing or cache')
     .action(
-      async (options: {
-        binary?: string;
-        force?: boolean;
-        repair?: boolean;
-        retryFailed?: boolean;
-        parallel?: string;
-        batchSize?: string;
-      }) => {
+      async (
+        options: {
+          binary?: string;
+          force?: boolean;
+          repair?: boolean;
+          retryFailed?: boolean;
+          cache?: boolean;
+        } & TuningOptions,
+      ) => {
         const deps = await pipelineDeps(runtime, options);
         const binary = deps.project.resolveBinary(options.binary);
         const result = await deps.project.withLock(() =>
@@ -89,6 +124,7 @@ export function registerStepCommands(program: Command, runtime: Runtime): void {
             force: options.force === true,
             repair: options.repair === true,
             retryFailed: options.retryFailed === true,
+            noCache: options.cache === false,
           }),
         );
         runtime.out.success(result.summary ?? 'reconstruction complete');
@@ -98,6 +134,20 @@ export function registerStepCommands(program: Command, runtime: Runtime): void {
             `Sessions: ${d.sessions}, reported cost: $${d.totalCostUsd.toFixed(4)} (covered by your subscription if applicable)`,
           );
           runtime.out.line(`Source: ${d.generation.directory}`);
+          const r = d.routing;
+          runtime.out.line(
+            `Tiers: ${
+              Object.entries(r.tiers)
+                .map(([t, n]) => `${t} ${n}`)
+                .join(', ') || '-'
+            }; escalations ${r.escalations}, ` +
+              `retries ${r.retries}, cache hits ${r.cacheHits}, max concurrent sessions ${r.maxConcurrentSessions}`,
+          );
+          if (d.metricsFile) runtime.out.line(`Metrics: ${d.metricsFile} (see "recode perf")`);
+          for (const issue of d.openIssues.slice(0, 10))
+            runtime.out.warn(
+              `${issue.id} accepted with open findings: ${issue.issues.slice(0, 2).join(' | ')}`,
+            );
           for (const failed of d.failedTasks) runtime.out.warn(`${failed.id}: ${failed.error}`);
           if (d.failedTasks.length > 0)
             runtime.out.hint('Retry with: recode reconstruct --retry-failed');
@@ -155,26 +205,28 @@ export function registerStepCommands(program: Command, runtime: Runtime): void {
     .option('--parallel <n>', 'maximum number of concurrent subagents')
     .option('--batch-size <n>', 'functions per lead-agent session')
     .option('--ai-review', 'include the AI review in the validation step')
-    .action(
-      async (options: {
-        binary?: string;
-        parallel?: string;
-        batchSize?: string;
-        aiReview?: boolean;
-      }) => {
-        const deps = await pipelineDeps(runtime, options);
-        const binary = deps.project.resolveBinary(options.binary);
-        await deps.project.withLock(async () => {
-          await analyzeStep(deps, binary);
-          await reconstructStep(deps, binary);
-          await buildStep(deps, binary);
-          await validateStep(deps, binary, { aiReview: options.aiReview === true });
-        });
-        const report = await readJson(
-          validationReportPath(deps.project, binary.id),
-          ValidationReportSchema,
-        );
-        printValidation(runtime, report);
-      },
-    );
+    .option(
+      '--sessions <n>',
+      'maximum number of concurrent Claude Code sessions (default from config: 4)',
+    )
+    .option(
+      '--dependencies <mode>',
+      'how calls order the work: adaptive (default), complete, signatures, legacy',
+    )
+    .option('--legacy', 'original behaviour: one session at a time, one model, no routing or cache')
+    .action(async (options: { binary?: string; aiReview?: boolean } & TuningOptions) => {
+      const deps = await pipelineDeps(runtime, options);
+      const binary = deps.project.resolveBinary(options.binary);
+      await deps.project.withLock(async () => {
+        await analyzeStep(deps, binary);
+        await reconstructStep(deps, binary);
+        await buildWithRepairs(deps, binary);
+        await validateStep(deps, binary, { aiReview: options.aiReview === true });
+      });
+      const report = await readJson(
+        validationReportPath(deps.project, binary.id),
+        ValidationReportSchema,
+      );
+      printValidation(runtime, report);
+    });
 }

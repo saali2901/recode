@@ -132,6 +132,7 @@ export class GhidraDecompiler implements Decompiler {
       dirs.staging,
       String(request.maxFunctions),
       plan.entry,
+      String(request.decompilerThreads ?? 1),
     );
     return args;
   }

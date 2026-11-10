@@ -2,7 +2,7 @@ import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['dist', 'coverage', 'node_modules', 'test/fixtures/build'] },
+  { ignores: ['dist', '.bench', 'coverage', 'node_modules', 'test/fixtures/build'] },
   js.configs.recommended,
   ...tseslint.configs.strict,
   {
@@ -17,7 +17,13 @@ export default tseslint.config(
     // Test doubles for external CLIs run as plain Node scripts.
     files: ['test/helpers/*.mjs', 'scripts/*.mjs'],
     languageOptions: {
-      globals: { process: 'readonly', console: 'readonly', setInterval: 'readonly' },
+      globals: {
+        process: 'readonly',
+        console: 'readonly',
+        setInterval: 'readonly',
+        setTimeout: 'readonly',
+        performance: 'readonly',
+      },
     },
   },
   {

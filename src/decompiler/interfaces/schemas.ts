@@ -77,3 +77,34 @@ export const ProgramInfoSchema = z.object({
   typeCount: z.number().int(),
 });
 export type ProgramInfo = z.infer<typeof ProgramInfoSchema>;
+
+/**
+ * Optional structured facts exported by the Ghidra script next to the classic files (older analyses and other
+ * backends may not have it). Everything here comes from Ghidra's program database, not from text matching.
+ */
+export const FunctionFactsSchema = z.object({
+  address: HexSchema,
+  basicBlocks: z.number().int().nonnegative(),
+  instructionCount: z.number().int().nonnegative(),
+  /** Calls whose target is computed at run time (function pointers, vtables, import thunks excluded). */
+  indirectCalls: z.number().int().nonnegative().default(0),
+  /** Computed jumps (jump tables, tail calls through registers). */
+  computedJumps: z.number().int().nonnegative().default(0),
+  hasNoReturn: z.boolean().default(false),
+  stackFrameSize: z.number().int().nonnegative().optional(),
+  /** Addresses of data (non-function) locations this function references. */
+  dataRefs: z.array(HexSchema).default([]),
+});
+export type FunctionFacts = z.infer<typeof FunctionFactsSchema>;
+
+export const FactsFileSchema = z.object({
+  functions: z.array(FunctionFactsSchema),
+  strings: z.array(z.object({ address: HexSchema, value: z.string(), length: z.number().int() })),
+  imports: z.array(
+    z.object({ library: z.string(), name: z.string(), address: z.string().nullable() }),
+  ),
+  exports: z.array(z.object({ name: z.string(), address: HexSchema })),
+  /** Non-fatal problems while collecting facts (a section may be partial). */
+  warnings: z.array(z.string()).default([]),
+});
+export type FactsFile = z.infer<typeof FactsFileSchema>;

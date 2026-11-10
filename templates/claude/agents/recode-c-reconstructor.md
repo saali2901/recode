@@ -13,6 +13,16 @@ Task id, address, file paths of the decompiled C and assembly, optional analysis
 callee prototypes, and the shared types header (`recode_types.h` content via `results/types.json`).
 For repair tasks: the previous result and the compiler diagnostics to fix.
 
+If the brief names a **context file** (`reconstruction/<binary-id>/context/<taskId>.json`), read it first: it holds
+the function's measured properties, callee prototypes (reconstructed ones are authoritative, `ghidra-signature`
+ones are the decompiler's guess), referenced strings and globals, the program types the decompiler output mentions,
+the other functions of a mutually recursive group, and - for a second attempt - the findings that must be fixed.
+You do not need the whole-program analysis files for this task.
+
+If the brief names a **previous result** with findings, you are the second opinion: start from that result, fix
+exactly the listed findings, keep everything that was correct, and do not start over. Do not hide a finding by
+removing logic; if a finding cannot be fixed with the evidence at hand, say so in `assumptions`.
+
 ## Output
 
 Write exactly one file, the result path from your brief

@@ -6,6 +6,7 @@ import {
   type ReconstructOptions,
   type ReconstructSummary,
 } from '../ai/orchestration/reconstruct.js';
+import { metricsDir } from '../ai/orchestration/reconstruct.js';
 import { reviewReconstruction } from '../ai/orchestration/review.js';
 import { createClaudeSessionRunner, type SessionRunner } from '../ai/orchestration/session.js';
 import { RecodeError } from '../core/errors/index.js';
@@ -36,6 +37,31 @@ export interface PipelineDeps {
   sessionRunner?: SessionRunner | undefined;
   /** Skip the prerequisite check (tests with mocked tools). */
   skipPrerequisites?: boolean | undefined;
+}
+
+export const DEPENDENCY_MODES = ['adaptive', 'complete', 'signatures', 'legacy'] as const;
+
+/** Per-run overrides of the scheduler settings (CLI flags and the web interface share them). */
+export interface RunTuning {
+  parallel?: number | undefined;
+  batchSize?: number | undefined;
+  sessions?: number | undefined;
+  dependencies?: (typeof DEPENDENCY_MODES)[number] | undefined;
+  legacy?: boolean | undefined;
+}
+
+/** Returns a copy of the configuration with the per-run overrides applied. */
+export function applyTuning(config: RecodeConfig, tuning: RunTuning): RecodeConfig {
+  const next = structuredClone(config);
+  if (tuning.parallel !== undefined) next.claude.maxParallelAgents = tuning.parallel;
+  if (tuning.batchSize !== undefined) next.claude.batchSize = tuning.batchSize;
+  if (tuning.sessions !== undefined) {
+    next.scheduler.maxSessions = tuning.sessions;
+    next.scheduler.initialSessions = Math.min(next.scheduler.initialSessions, tuning.sessions);
+  }
+  if (tuning.dependencies !== undefined) next.scheduler.mode = tuning.dependencies;
+  if (tuning.legacy) next.scheduler.mode = 'legacy';
+  return next;
 }
 
 export function workflowFor(deps: PipelineDeps, binary: BinaryRecord): WorkflowManager {
@@ -90,6 +116,7 @@ export async function analyzeStep(
     execute: async () => {
       if (!deps.skipPrerequisites) await requireTools(config, ['java']);
       const outputDirectory = project.analysisDir(binary.id);
+      const ghidraStarted = performance.now();
       const summary = await decompiler.analyze({
         binaryPath: project.binaryPath(binary),
         metadata: binary.metadata,
@@ -98,9 +125,20 @@ export async function analyzeStep(
         logFile: path.join(project.paths.logs, `analyze-${binary.id}.log`),
         timeoutSeconds: config.ghidra.analysisTimeoutSeconds,
         maxFunctions: config.ghidra.maxFunctions,
+        decompilerThreads: config.ghidra.decompilerThreads,
         ...(deps.signal ? { signal: deps.signal } : {}),
       });
       await writeJsonAtomic(path.join(outputDirectory, 'metadata.json'), binary.metadata);
+      await writeJsonAtomic(path.join(metricsDir(project, binary.id), 'analysis.json'), {
+        at: new Date().toISOString(),
+        tool: summary.tool,
+        toolVersion: summary.toolVersion,
+        ghidraMs: Math.round(performance.now() - ghidraStarted),
+        decompilerThreads: config.ghidra.decompilerThreads,
+        functions: summary.functionCount,
+        decompiled: summary.decompiledCount,
+        failedFunctions: summary.failedFunctions,
+      });
       for (const message of summary.warnings) deps.events.emit({ type: 'warning', message });
       return {
         summary: `${summary.tool} ${summary.toolVersion}: ${summary.functionCount} functions, ${summary.decompiledCount} decompiled`,
@@ -205,6 +243,62 @@ export async function buildStep(
   return { ...result, ...(report ? { report } : {}) };
 }
 
+export interface RepairLoopResult {
+  rounds: number;
+  build: BuildStepResult;
+}
+
+/**
+ * Builds the project; while the build fails with errors attributable to single functions, sends exactly those
+ * functions back to the agents (one tier stronger than before, with the compiler output) and rebuilds. The build is
+ * incremental: unchanged generated files keep their timestamps, so only the repaired sources are recompiled.
+ * Stops after `validation.autoRepairRounds` rounds or when a round fixes nothing.
+ */
+export async function buildWithRepairs(
+  deps: PipelineDeps,
+  binary: BinaryRecord,
+): Promise<RepairLoopResult> {
+  const rounds = deps.config.validation.autoRepairRounds;
+  let round = 0;
+  for (;;) {
+    try {
+      return {
+        rounds: round,
+        build: await buildStep(deps, binary, round > 0 ? { force: true } : {}),
+      };
+    } catch (error) {
+      const retryable = error instanceof RecodeError && error.code === 'TOOL_FAILED';
+      if (!retryable || round >= rounds || deps.signal?.aborted) throw error;
+      const diagnostics = await readJsonIfExists(
+        path.join(deps.project.buildDir(binary.id), 'build-report.json'),
+        z.object({
+          diagnostics: z.array(z.object({ severity: z.string(), taskId: z.string().optional() })),
+        }),
+      );
+      const attributable = diagnostics?.diagnostics.some((d) => d.severity === 'error' && d.taskId);
+      if (!attributable) throw error;
+      round++;
+      deps.events.emit({
+        type: 'info',
+        message: `Build failed; repair round ${round} of ${rounds}: sending the affected functions back to the agents.`,
+      });
+      await reconstructStep(deps, binary, { repair: true });
+    }
+  }
+}
+
+/** The reference source a differential spec points at (part of the validate fingerprint). */
+async function referencedSources(root: string, spec: string): Promise<string[]> {
+  try {
+    const parsed = JSON.parse(await fs.readFile(path.join(root, spec), 'utf8')) as {
+      referenceSource?: unknown;
+    };
+    return typeof parsed.referenceSource === 'string' ? [parsed.referenceSource] : [];
+  } catch {
+    return [];
+  }
+}
+
 export interface ValidateStepResult extends RunStepResult {
   report?: ValidationReport;
 }
@@ -224,8 +318,12 @@ export async function validateStep(
     path.join(project.buildDir(binary.id), 'build-report.json'),
     z.unknown(),
   );
+  const spec = config.validation.differentialSpec;
+  const specHash = spec
+    ? await hashFiles(project.root, [spec, ...(await referencedSources(project.root, spec))])
+    : '-';
   const fingerprint = sha256Text(
-    `validate:${options.aiReview ? 'review' : 'plain'}:${await hashFiles(project.reconstructionDir(binary.id), inputs)}:${JSON.stringify(buildReport)}`,
+    `validate:${options.aiReview ? 'review' : 'plain'}:${specHash}:${await hashFiles(project.reconstructionDir(binary.id), inputs)}:${JSON.stringify(buildReport)}`,
   );
   let report: ValidationReport | undefined;
   const result = await workflowFor(deps, binary).runStep({
@@ -257,6 +355,8 @@ export async function validateStep(
         project,
         binary,
         includeReviews: options.aiReview === true,
+        config,
+        signal: deps.signal,
       });
       const failed = report.checks.filter((c) => c.outcome === 'failed').length;
       const passed = report.checks.filter((c) => c.outcome === 'passed').length;

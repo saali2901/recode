@@ -82,3 +82,19 @@ supported files change (the README stays short and has no CLI usage). Enforcemen
   and `src/` directories.
 - `scripts/skill-guard.mjs` is a Claude Code Stop hook (`.claude/settings.json`) and a git pre-commit check
   (`npm run hooks` enables `.githooks`). `SKIP_SKILL_GUARD=1` bypasses it once.
+
+## Performance work: benchmarks and metrics
+
+- `node scripts/bench.mjs <dist-dir> --functions 1000 --latency-ms 300 --shape layered --mode adaptive` runs the
+  reconstruction loop against a deterministic synthetic binary with an in-process fake session runner (no Ghidra, no
+  Claude). `scripts/bench-matrix.mjs <dist-dir>` runs a fixed matrix. To compare with another version, build it
+  (`npm run build:server`), copy its `dist` next to the repository (any directory below it that can resolve
+  `node_modules` and has `templates` next to `dist`) and run the same command; options the old version does not know are
+  ignored. The numbers measure orchestration, persistence and scheduling - not AI quality or real API latency.
+- `recode perf [--list] [--run <name>] [--compare <a>,<b>]` shows the metrics of real runs (`.recode/metrics/<id>/`):
+  wall time, Ghidra time, sessions per tier/model, tokens and cost as reported by the CLI, queue wait, concurrency,
+  cache hit rate, retries, escalations, compile errors. `--legacy` re-runs with the original scheduling semantics so two
+  runs of the same project can be compared with `--compare`.
+- Test doubles: `mock-claude.mjs` understands `MOCK_LATENCY_MS`, `MOCK_UNAVAILABLE_MODELS`, `needs:<fn>:<model>`
+  (weak result unless the subagent model matches) and the availability probe; `fake-ghidra.mjs` also writes `facts.json`
+  and checks the optional decompiler-thread argument.

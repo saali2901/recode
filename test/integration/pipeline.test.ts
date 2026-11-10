@@ -98,9 +98,22 @@ describe('complete workflow with fake Ghidra and mock Claude (real cmake/ninja/g
     const world = await createWorld();
     await importSample(world);
     await world.run(['analyze'], { overrides: HERMETIC });
-    await world.run(['reconstruct', '--batch-size', '2', '--parallel', '1'], {
-      overrides: HERMETIC,
-    });
+    await world.run(
+      [
+        'reconstruct',
+        '--batch-size',
+        '2',
+        '--parallel',
+        '1',
+        '--sessions',
+        '1',
+        '--dependencies',
+        'complete',
+      ],
+      {
+        overrides: HERMETIC,
+      },
+    );
 
     const calls = await world.claudeInvocations();
     // overview, types, then dependency waves: [add_ints, multiply] [square] [shape_area] [sum_areas] [main]
@@ -247,8 +260,15 @@ describe('complete workflow with fake Ghidra and mock Claude (real cmake/ninja/g
     const before = (await world.claudeInvocations()).length;
     const resumed = await world.run(['reconstruct'], { overrides: HERMETIC });
     expect(resumed.code, resumed.stderr).toBe(0);
-    // only the interrupted function is redone, in one lead session
-    expect((await world.claudeInvocations()).length).toBe(before + 1);
+    // the interrupted function's accepted result is found in the persistent cache: no model call at all
+    expect((await world.claudeInvocations()).length).toBe(before);
+    const resumedTasks = JSON.parse(await fs.readFile(taskFile, 'utf8')).tasks;
+    expect(resumedTasks.find((t: { title: string }) => t.title.startsWith('square'))).toMatchObject(
+      {
+        status: 'completed',
+        fromCache: true,
+      },
+    );
     expect((await world.run(['build'], { overrides: HERMETIC })).code).toBe(0);
   });
 
@@ -256,6 +276,8 @@ describe('complete workflow with fake Ghidra and mock Claude (real cmake/ninja/g
     const world = await createWorld();
     await importSample(world);
     await world.run(['analyze'], { overrides: HERMETIC });
+    // Without the per-function compile check the broken function only shows up in the project build.
+    await world.run(['config', 'set', 'validation.compileCheck', 'off']);
     world.setEnv('MOCK_CLAUDE_MODE', 'break-multiply');
     expect((await world.run(['reconstruct'], { overrides: HERMETIC })).code).toBe(0);
 

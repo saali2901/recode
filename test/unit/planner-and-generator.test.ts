@@ -34,11 +34,10 @@ const fn = (
 
 describe('task planner', () => {
   it('orders callees before callers and puts overview and types first', () => {
-    const plan = planTasks([
-      fn('0x30', 'top', ['0x20']),
-      fn('0x20', 'mid', ['0x10']),
-      fn('0x10', 'leaf'),
-    ]);
+    const plan = planTasks(
+      [fn('0x30', 'top', ['0x20']), fn('0x20', 'mid', ['0x10']), fn('0x10', 'leaf')],
+      { mode: 'complete' },
+    );
     expect(plan.tasks.map((t) => t.id)).toEqual([
       'overview',
       'types',
@@ -52,14 +51,62 @@ describe('task planner', () => {
     ]);
   });
 
-  it('breaks cycles from recursion so the graph stays acyclic', () => {
-    const plan = planTasks([fn('0x10', 'a', ['0x20', '0x10']), fn('0x20', 'b', ['0x10'])]);
-    const ids = plan.tasks.filter((t) => t.kind === 'function');
-    const edges = ids.flatMap((t) =>
-      t.dependsOn.filter((d) => d.startsWith('fn_')).map((d) => [t.id, d]),
+  it('groups mutual recursion into one component and keeps the graph acyclic', () => {
+    const plan = planTasks(
+      [fn('0x10', 'a', ['0x20', '0x10']), fn('0x20', 'b', ['0x10']), fn('0x30', 'c', ['0x10'])],
+      { mode: 'complete' },
     );
-    expect(edges).toHaveLength(1); // exactly one direction survives
-    for (const t of ids) expect(t.dependsOn).not.toContain(t.id);
+    const byId = new Map(plan.tasks.map((t) => [t.id, t]));
+    expect(byId.get('fn_00000010')?.group).toBeDefined();
+    expect(byId.get('fn_00000010')?.group).toBe(byId.get('fn_00000020')?.group);
+    expect(byId.get('fn_00000030')?.group).toBeUndefined();
+    // members of a group do not wait for each other; the outside caller waits for the whole group
+    expect(byId.get('fn_00000010')?.dependsOn).toEqual(['types']);
+    expect(byId.get('fn_00000020')?.dependsOn).toEqual(['types']);
+    expect(byId.get('fn_00000030')?.dependsOn).toEqual(['types', 'fn_00000010']);
+    expect(plan.stats.largestComponent).toBe(2);
+  });
+
+  it('adaptive mode only needs the types: callee order is a soft dependency', () => {
+    const plan = planTasks([fn('0x20', 'mid', ['0x10']), fn('0x10', 'leaf')]);
+    const mid = plan.tasks.find((t) => t.id === 'fn_00000020');
+    expect(mid?.dependsOn).toEqual(['types']);
+    expect(mid?.softDependsOn).toEqual(['fn_00000010']);
+    expect(mid?.priority).toBeLessThan(
+      plan.tasks.find((t) => t.id === 'fn_00000010')?.priority ?? -1,
+    );
+  });
+
+  it('signatures mode has no call dependencies at all', () => {
+    const plan = planTasks([fn('0x20', 'mid', ['0x10']), fn('0x10', 'leaf')], {
+      mode: 'signatures',
+    });
+    for (const t of plan.tasks.filter((x) => x.kind === 'function')) {
+      expect(t.dependsOn).toEqual(['types']);
+      expect(t.softDependsOn).toEqual([]);
+    }
+  });
+
+  it('survives a call chain far deeper than the JavaScript stack', () => {
+    const n = 50_000;
+    const functions = Array.from({ length: n }, (_, i) =>
+      fn(
+        `0x${(0x1000 + i * 4).toString(16)}`,
+        `f${i}`,
+        i + 1 < n ? [`0x${(0x1000 + (i + 1) * 4).toString(16)}`] : [],
+      ),
+    );
+    const plan = planTasks(functions);
+    expect(plan.stats.criticalPath).toBe(n);
+    expect(plan.stats.leaves).toBe(1);
+  });
+
+  it('the legacy planner keeps the original behaviour (back edges dropped, hard callee dependencies)', () => {
+    const plan = planTasks([fn('0x10', 'a', ['0x20', '0x10']), fn('0x20', 'b', ['0x10'])], {
+      mode: 'legacy',
+    });
+    const edges = plan.tasks.flatMap((t) => t.dependsOn.filter((d) => d.startsWith('fn_')));
+    expect(edges).toHaveLength(1);
   });
 
   it('excludes external functions, thunks and functions without output', () => {
@@ -241,7 +288,7 @@ describe('validation checks', () => {
   it('does not invent compile results without a build', () => {
     const checks = evaluate();
     expect(
-      checks.filter((c) => c.level === 'syntactic' || c.level === 'compiled').map((c) => c.outcome),
+      checks.filter((c) => c.id === 'syntax' || c.id === 'compile').map((c) => c.outcome),
     ).toEqual(['not-assessed', 'not-assessed']);
   });
 

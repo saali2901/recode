@@ -1,6 +1,6 @@
 import { RecodeError } from '../../core/errors/index.js';
 import { runProcess, type RunResult } from '../../infrastructure/process/process-manager.js';
-import { parseStreamLine, type ClaudeEvent } from './events.js';
+import { parseStreamLine, type ClaudeEvent, type TokenUsage } from './events.js';
 
 export type BlockReason = 'rate-limit' | 'untrusted';
 
@@ -43,6 +43,9 @@ export interface ClaudeRunResult {
   resultText: string;
   costUsd: number | undefined;
   turns: number | undefined;
+  /** Model the CLI reported at start-up (the concrete model behind an alias), if any. */
+  model: string | undefined;
+  usage: TokenUsage | undefined;
   /** Subagent types that were started, in order. */
   subagentsStarted: string[];
   unknownEventTypes: string[];
@@ -104,6 +107,7 @@ export async function runClaude(options: ClaudeRunOptions): Promise<ClaudeRunRes
   const unknownEventTypes = new Set<string>();
   let final: Extract<ClaudeEvent, { kind: 'result' }> | undefined;
   let lastText = '';
+  let model: string | undefined;
 
   const raw = await runProcess({
     command: options.command,
@@ -116,7 +120,8 @@ export async function runClaude(options: ClaudeRunOptions): Promise<ClaudeRunRes
     ...(options.logFile ? { logFile: options.logFile } : {}),
     onStdoutLine: (line) => {
       for (const event of parseStreamLine(line)) {
-        if (event.kind === 'result') final = event;
+        if (event.kind === 'init') model = event.model;
+        else if (event.kind === 'result') final = event;
         else if (event.kind === 'unknown') unknownEventTypes.add(event.type);
         else if (event.kind === 'tool-use' && event.subagentType)
           subagentsStarted.push(event.subagentType);
@@ -143,6 +148,8 @@ export async function runClaude(options: ClaudeRunOptions): Promise<ClaudeRunRes
     resultText: final?.text || lastText,
     costUsd: final?.costUsd,
     turns: final?.turns,
+    model,
+    usage: final?.usage,
     subagentsStarted,
     unknownEventTypes: [...unknownEventTypes],
     failure,

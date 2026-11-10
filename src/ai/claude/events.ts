@@ -23,8 +23,17 @@ export type ClaudeEvent =
       costUsd: number | undefined;
       turns: number | undefined;
       durationMs: number | undefined;
+      usage: TokenUsage | undefined;
     }
   | { kind: 'unknown'; type: string };
+
+/** Token counts the CLI reports in its final result event (absent in older CLI versions). */
+export interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+}
 
 const BaseEventSchema = z.object({ type: z.string() }).passthrough();
 
@@ -69,6 +78,15 @@ const ResultEventSchema = z
     total_cost_usd: z.number().optional(),
     num_turns: z.number().optional(),
     duration_ms: z.number().optional(),
+    usage: z
+      .object({
+        input_tokens: z.number().optional(),
+        output_tokens: z.number().optional(),
+        cache_read_input_tokens: z.number().optional(),
+        cache_creation_input_tokens: z.number().optional(),
+      })
+      .passthrough()
+      .optional(),
   })
   .passthrough();
 
@@ -119,6 +137,14 @@ export function parseStreamLine(line: string): ClaudeEvent[] {
         costUsd: data.total_cost_usd,
         turns: data.num_turns,
         durationMs: data.duration_ms,
+        usage: data.usage
+          ? {
+              inputTokens: data.usage.input_tokens ?? 0,
+              outputTokens: data.usage.output_tokens ?? 0,
+              cacheReadTokens: data.usage.cache_read_input_tokens ?? 0,
+              cacheCreationTokens: data.usage.cache_creation_input_tokens ?? 0,
+            }
+          : undefined,
       },
     ];
   }

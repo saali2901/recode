@@ -32,7 +32,7 @@ function main() {
   }
   const [imported] = after('-import') ?? [];
   const [scriptPath] = after('-scriptPath') ?? [];
-  const post = after('-postScript', 4);
+  const post = after('-postScript', 5);
   if (!imported || !fs.existsSync(imported)) fail('-import file missing');
   if (!scriptPath || !fs.existsSync(path.join(scriptPath, 'ExportAnalysis.java')))
     fail('ExportAnalysis.java not found in -scriptPath');
@@ -54,8 +54,9 @@ function main() {
     if (args[args.indexOf('-loader') + 1] !== 'BinaryLoader') fail('DOL needs BinaryLoader');
   }
   if (!post || post[0] !== 'ExportAnalysis.java') fail('-postScript ExportAnalysis.java missing');
-  const [, outDir, maxFunctions, entry] = post;
+  const [, outDir, maxFunctions, entry, threads] = post;
   if (!outDir || !maxFunctions || !entry) fail('script arguments missing');
+  if (threads !== undefined && !/^\d+$/.test(threads)) fail('decompilerThreads must be a number');
   if (mode === 'noexport') process.exit(0);
 
   const table = JSON.parse(fs.readFileSync(process.env.FAKE_GHIDRA_FUNCTIONS, 'utf8'));
@@ -93,6 +94,21 @@ function main() {
   });
   const json = (name, value) => fs.writeFileSync(path.join(outDir, name), JSON.stringify(value));
   json('functions.json', { functions });
+  json('facts.json', {
+    functions: functions.map((f) => ({
+      address: f.address,
+      basicBlocks: 1,
+      instructionCount: 1,
+      indirectCalls: 0,
+      computedJumps: 0,
+      hasNoReturn: false,
+      dataRefs: [],
+    })),
+    strings: [],
+    imports: [],
+    exports: [],
+    warnings: [],
+  });
   json('references.json', {
     references: functions.flatMap((f) =>
       f.calls.map((to) => ({

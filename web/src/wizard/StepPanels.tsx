@@ -1,10 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
-import { api, projectPath, urlWithToken } from '../api';
+import { ApiError, api, projectPath, urlWithToken } from '../api';
 import { ErrorAlert, StatusTag } from '../components/common';
 import { JobPanel } from '../components/JobPanel';
 import { estimateRemaining, formatDuration } from '../format';
 import { useNow, useResource, type StreamState } from '../hooks';
-import type { BinarySummary, StepName, TaskItem, ValidationReport } from '../types';
+import type {
+  BinarySummary,
+  DependencyMode,
+  PerfReport,
+  RunOptions,
+  StepName,
+  TaskItem,
+  ValidationReport,
+} from '../types';
+import { formatCount } from '../format';
 
 interface RunProps {
   project: string;
@@ -140,6 +149,7 @@ export function TaskList({ tasks }: { tasks: TaskItem[] }) {
           <tr>
             <th>Task</th>
             <th>Status</th>
+            <th>Model tier</th>
             <th className="num">Attempts</th>
           </tr>
         </thead>
@@ -151,9 +161,19 @@ export function TaskList({ tasks }: { tasks: TaskItem[] }) {
                 {task.lastError && task.status !== 'completed' && (
                   <div className="text-sm text-muted">{task.lastError}</div>
                 )}
+                {task.openIssues && task.openIssues.length > 0 && (
+                  <div className="text-sm text-muted">
+                    Open findings: {task.openIssues.slice(0, 2).join(' | ')}
+                  </div>
+                )}
               </td>
               <td>
                 <StatusTag status={task.status} />
+              </td>
+              <td>
+                {task.tier ? <span className="tag">{task.tier}</span> : '–'}
+                {task.escalations ? ` ↑${task.escalations}` : ''}
+                {task.fromCache ? ' (cache)' : ''}
               </td>
               <td className="num">{task.attempts}</td>
             </tr>
@@ -164,9 +184,203 @@ export function TaskList({ tasks }: { tasks: TaskItem[] }) {
   );
 }
 
+const DEPENDENCY_LABELS: Record<DependencyMode, string> = {
+  adaptive: 'Adaptive (fast; callers may start before their callees are done)',
+  complete: 'Complete (callees first; best prototypes, slower)',
+  signatures: 'Signatures only (fastest; no waiting for callees)',
+  legacy: 'Original behaviour (one session, one model, no routing)',
+};
+
+function without(options: RunOptions, key: keyof RunOptions): RunOptions {
+  return Object.fromEntries(Object.entries(options).filter(([k]) => k !== key)) as RunOptions;
+}
+
+/** Per-run scheduler settings. Defaults come from the project configuration (Settings). */
+export function RunOptionsForm({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: RunOptions;
+  onChange: (next: RunOptions) => void;
+  disabled: boolean;
+}) {
+  return (
+    <details className="stack gap-2">
+      <summary>Run options</summary>
+      <div className="grid grid--2 gap-4">
+        <div className="field">
+          <label className="field__label" htmlFor="run-sessions">
+            Concurrent sessions (maximum)
+          </label>
+          <input
+            id="run-sessions"
+            className="input"
+            type="number"
+            min={1}
+            max={16}
+            placeholder="from settings"
+            disabled={disabled}
+            value={value.sessions ?? ''}
+            onChange={(e) => {
+              const n = Number.parseInt(e.target.value, 10);
+              const rest = without(value, 'sessions');
+              onChange(
+                Number.isFinite(n) ? { ...rest, sessions: Math.min(16, Math.max(1, n)) } : rest,
+              );
+            }}
+          />
+        </div>
+        <div className="field">
+          <label className="field__label" htmlFor="run-dependencies">
+            Function dependencies
+          </label>
+          <select
+            id="run-dependencies"
+            className="select"
+            disabled={disabled}
+            value={value.dependencies ?? ''}
+            onChange={(e) => {
+              const rest = without(value, 'dependencies');
+              onChange(
+                e.target.value ? { ...rest, dependencies: e.target.value as DependencyMode } : rest,
+              );
+            }}
+          >
+            <option value="">From settings (adaptive)</option>
+            {(Object.keys(DEPENDENCY_LABELS) as DependencyMode[]).map((mode) => (
+              <option key={mode} value={mode}>
+                {DEPENDENCY_LABELS[mode]}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+      <label className="choice">
+        <input
+          type="checkbox"
+          disabled={disabled}
+          checked={value.noCache === true}
+          onChange={(e) => onChange({ ...value, noCache: e.target.checked })}
+        />{' '}
+        Ignore the result cache in this run
+      </label>
+      <p className="text-sm text-muted">
+        Models per tier and the other limits are set in Settings (routing.* and scheduler.*).
+      </p>
+    </details>
+  );
+}
+
+function pct(value: number): string {
+  return `${(value * 100).toFixed(0)} %`;
+}
+
+/** Metrics of the latest reconstruction run (from the same files `recode perf` reads). */
+export function PerformancePanel({ report }: { report: PerfReport | undefined }) {
+  if (!report) {
+    return <p className="text-sm text-muted">No finished run yet - metrics appear after a run.</p>;
+  }
+  const s = report.summary;
+  return (
+    <div className="stack gap-3">
+      <p className="text-sm text-muted">
+        Run {report.runId} · mode <strong>{report.mode}</strong>
+        {report.analysis
+          ? ` · Ghidra ${(report.analysis.ghidraMs / 1000).toFixed(1)} s, ${report.analysis.functions} functions`
+          : ''}
+      </p>
+      <dl className="grid grid--2 gap-2" aria-label="Run summary">
+        <div>
+          <dt className="text-sm text-muted">Duration</dt>
+          <dd>{formatDuration(s.wallSeconds * 1000)}</dd>
+        </div>
+        <div>
+          <dt className="text-sm text-muted">Model sessions</dt>
+          <dd>{formatCount(s.modelCalls)}</dd>
+        </div>
+        <div>
+          <dt className="text-sm text-muted">Concurrent sessions (max / average)</dt>
+          <dd>
+            {s.workersMax} / {s.workersAverage}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-sm text-muted">Mean queue wait</dt>
+          <dd>{s.meanQueueWaitSeconds.toFixed(1)} s</dd>
+        </div>
+        <div>
+          <dt className="text-sm text-muted">Accepted / failed</dt>
+          <dd>
+            {formatCount(s.accepted)} / {formatCount(s.failed)}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-sm text-muted">Escalations / retries</dt>
+          <dd>
+            {s.escalations} / {s.retries}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-sm text-muted">Cache hit rate</dt>
+          <dd>{pct(s.cacheHitRate)}</dd>
+        </div>
+        <div>
+          <dt className="text-sm text-muted">Compile errors found before the build</dt>
+          <dd>{s.compileErrors}</dd>
+        </div>
+      </dl>
+      <div className="table-wrap">
+        <table className="table--compact">
+          <caption className="sr-only">Sessions per model tier</caption>
+          <thead>
+            <tr>
+              <th>Tier</th>
+              <th>Model</th>
+              <th className="num">Sessions</th>
+              <th className="num">Seconds</th>
+              <th className="num">Input tokens</th>
+              <th className="num">Output tokens</th>
+              <th className="num">Failed</th>
+            </tr>
+          </thead>
+          <tbody>
+            {s.perModel.map((m) => (
+              <tr key={`${m.tier}|${m.model}`}>
+                <td>{m.tier}</td>
+                <td>{m.model}</td>
+                <td className="num">{m.calls}</td>
+                <td className="num">{m.seconds.toFixed(1)}</td>
+                <td className="num">{formatCount(m.inputTokens)}</td>
+                <td className="num">{formatCount(m.outputTokens)}</td>
+                <td className="num">{m.failures}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-sm text-muted">
+        Tokens and cost are reported by the Claude Code CLI and stay 0 if the installed version does
+        not report them. Timings of this tool, not a measure of reconstruction quality.
+      </p>
+    </div>
+  );
+}
+
 export function ReconstructPanel(props: RunProps) {
   const { project, binary } = props;
   const { error, start, cancel } = useStart(project, binary, props.onStarted);
+  const [options, setOptions] = useState<RunOptions>({});
+  const perf = useResource(
+    () =>
+      api
+        .get<PerfReport>(`${projectPath(project)}/binaries/${encodeURIComponent(binary.id)}/perf`)
+        .catch((e: unknown) => {
+          if (e instanceof ApiError && e.status === 404) return undefined;
+          throw e;
+        }),
+    `${binary.id}:perf:${props.stream.progressTick}`,
+  );
   const stream = jobFor(props.stream, 'reconstruct');
   const running = stream.job?.status === 'running';
   const tasks = useResource(
@@ -212,9 +426,10 @@ export function ReconstructPanel(props: RunProps) {
         running={running}
         busy={props.busy}
         label={runLabel(binary.steps, 'reconstruct')}
-        onStart={(force) => void start('reconstruct', { force })}
+        onStart={(force) => void start('reconstruct', { force, options })}
         onCancel={() => void cancel()}
       />
+      <RunOptionsForm value={options} onChange={setOptions} disabled={running || props.busy} />
       {error && <ErrorAlert error={error} title="Cannot start" />}
 
       {list.length > 0 && (
@@ -267,6 +482,10 @@ export function ReconstructPanel(props: RunProps) {
             ))}
           </ul>
         </div>
+      </div>
+      <div className="stack gap-2">
+        <h3>Performance of the last run</h3>
+        {perf.error ? <ErrorAlert error={perf.error} /> : <PerformancePanel report={perf.data} />}
       </div>
       <JobPanel stream={stream} label="reconstruct" project={project} />
     </div>

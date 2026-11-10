@@ -57,3 +57,15 @@ npm run dev:web      # Vite dev server (proxies /api to 127.0.0.1:7878; start "r
 npm test             # includes API tests (test/integration/server.test.ts) and React component tests (web/src)
 npm run test:e2e     # builds, then drives Chromium through the whole wizard (Playwright)
 ```
+
+## Reconstruction options and performance
+
+- **Run options** (collapsed below the Start button): maximum concurrent sessions, how function calls order the work
+  (adaptive, complete, signatures-only, original behaviour) and "ignore the result cache in this run". Empty fields use
+  the project configuration. Models per tier, thresholds and limits live in Settings (`routing.*`, `scheduler.*`).
+- **Task list**: each function shows the model tier it ran at, how often it was escalated to a stronger model, whether it
+  came from the cache and any findings that were accepted but not resolved.
+- **Performance of the last run**: duration, sessions per tier and model, concurrency, queue wait, cache hit rate,
+  escalations, retries, compile errors found before the build, and the Ghidra time. Token counts and cost are shown
+  as reported by the Claude Code CLI (0 if it does not report them). This is the data `recode perf` prints; there is no
+  history or comparison view in the browser yet.

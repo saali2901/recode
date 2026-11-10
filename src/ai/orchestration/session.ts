@@ -14,6 +14,12 @@ export interface SessionRequest {
   prompt: string;
   spec: BatchSpec;
   batchFile: string;
+  /** Model for the main (lead) thread; undefined = configured default. */
+  model?: string | undefined;
+  /** Model for subagents (sets CLAUDE_CODE_SUBAGENT_MODEL); undefined = Claude Code decides. */
+  subagentModel?: string | undefined;
+  /** Routing label of the session, for logs and metrics. */
+  tier?: string | undefined;
   signal?: AbortSignal | undefined;
 }
 
@@ -42,7 +48,10 @@ export function createClaudeSessionRunner(context: SessionContext): SessionRunne
       agent: request.agent,
       availableTools: ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Task'],
       allowedTools: ['Read', 'Glob', 'Grep', 'Task', `Edit(${rootRelative})`],
-      model: config.claude.model,
+      model: request.model ?? config.claude.model,
+      ...(request.subagentModel
+        ? { env: { ...process.env, CLAUDE_CODE_SUBAGENT_MODEL: request.subagentModel } }
+        : {}),
       maxTurns: config.claude.maxTurns,
       timeoutMs: config.claude.sessionTimeoutMinutes * 60_000,
       signal: request.signal,
@@ -81,7 +90,12 @@ async function appendSessionLog(
     sessionId: result.sessionId,
     ok: result.ok,
     failure: result.failure,
+    tier: request.tier,
+    model: request.model,
+    subagentModel: request.subagentModel,
+    resolvedModel: result.model,
     costUsd: result.costUsd,
+    usage: result.usage,
     turns: result.turns,
     subagentsStarted: result.subagentsStarted,
     unknownEventTypes: result.unknownEventTypes,

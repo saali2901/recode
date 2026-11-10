@@ -1,7 +1,8 @@
 import path from 'node:path';
-import { readJson } from '../../infrastructure/filesystem/files.js';
+import { pathExists, readJson } from '../../infrastructure/filesystem/files.js';
 import {
   CallGraphFileSchema,
+  FactsFileSchema,
   FunctionsFileSchema,
   ProgramInfoSchema,
   ReferencesFileSchema,
@@ -35,6 +36,9 @@ export async function validateAnalysisDirectory(dir: string): Promise<{
   await readJson(path.join(dir, ANALYSIS_FILES.symbols), SymbolsFileSchema);
   await readJson(path.join(dir, ANALYSIS_FILES.types), TypesFileSchema);
   await readJson(path.join(dir, ANALYSIS_FILES.callGraph), CallGraphFileSchema);
+  // Optional: absent for older exports and other backends, but if present it must be valid.
+  const factsFile = path.join(dir, 'facts.json');
+  if (await pathExists(factsFile)) await readJson(factsFile, FactsFileSchema);
   return { program, functions };
 }
 

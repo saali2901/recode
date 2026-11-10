@@ -15,6 +15,11 @@ export const BatchTaskSchema = z.object({
   calleePrototypes: z.array(
     z.object({ address: z.string(), name: z.string(), prototype: z.string(), status: z.string() }),
   ),
+  /** Task-specific knowledge file (callee prototypes, strings, globals, relevant types, earlier findings). */
+  contextFile: z.string().optional(),
+  /** Routing label and model for this task (informational for the agents). */
+  tier: z.string().optional(),
+  model: z.string().optional(),
   previousResultFile: z.string().optional(),
   previousFailure: z.string().optional(),
   repairContext: z.string().optional(),
@@ -47,6 +52,11 @@ export function leadPrompt(options: { batchFile: string; spec: BatchSpec }): str
     spec.maxParallelAgents === 1
       ? 'Delegate strictly one task at a time.'
       : `Delegate independent tasks in parallel, but never more than ${spec.maxParallelAgents} at once.`,
+    '',
+    'Every task names a contextFile with the callee prototypes, strings, globals, relevant types and any earlier',
+    'findings for exactly that task: give it to the subagent instead of the whole analysis directory.',
+    'If a task has previousResultFile and repairContext, an earlier result exists: the subagent must refine it and',
+    'fix the listed findings, not start over.',
     '',
     'Follow your lead agent procedure: read the batch file, delegate every task to the right',
     'specialist subagent with a self-contained brief, verify each result file, and finish with a',

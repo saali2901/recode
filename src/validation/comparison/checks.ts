@@ -1,5 +1,6 @@
 import type { BuildReport } from '../build/builder.js';
 import type { ValidationCheckResult } from '../interfaces.js';
+import type { DifferentialOutcome } from '../differential/differential.js';
 import type { FunctionResult, ReviewResult } from '../../reconstruction/interfaces/results.js';
 
 export interface CheckInput {
@@ -7,8 +8,23 @@ export interface CheckInput {
   functionResults: FunctionResult[];
   totalFunctions: number;
   reviews: ReviewResult[] | undefined;
-  /** Whether a runnable reference and a comparator exist. Always false in the MVP. */
+  /** Whether a runnable reference and a comparator exist (a differential spec is configured). */
   hasExecutableComparator: boolean;
+  /** Result of the differential test against reference source, if one was configured and run. */
+  differential?: DifferentialOutcome | undefined;
+  /** Findings recorded while the functions were reconstructed (static checks, per-function compile). */
+  quality?: QualityLedger | undefined;
+}
+
+export interface QualityLedger {
+  tasks: Array<{
+    taskId: string;
+    status: string;
+    tier?: string | undefined;
+    escalations: number;
+    fromCache: boolean;
+    openIssues: string[];
+  }>;
 }
 
 export type ValidationCheck = (input: CheckInput) => ValidationCheckResult[];
@@ -103,16 +119,59 @@ const aiReview: ValidationCheck = ({ reviews }) => {
   ];
 };
 
-const referenceChecks: ValidationCheck = ({ hasExecutableComparator }) => [
-  {
-    id: 'functional',
-    level: 'functional',
-    title: 'Functional equivalence',
-    outcome: 'not-assessed',
-    detail: hasExecutableComparator
-      ? 'Comparator available.'
-      : 'No comparison mechanism is implemented in the MVP; successful compilation does not imply equivalent behavior.',
-  },
+const staticChecks: ValidationCheck = ({ quality }) => {
+  if (!quality) {
+    return [
+      {
+        id: 'static',
+        level: 'syntactic',
+        title: 'Static and per-function compile checks during reconstruction',
+        outcome: 'not-assessed',
+        detail:
+          'No quality ledger found (reconstruction ran before this check existed or in legacy mode).',
+      },
+    ];
+  }
+  const open = quality.tasks.filter((t) => t.openIssues.length > 0);
+  const failed = quality.tasks.filter((t) => t.status === 'failed');
+  const escalated = quality.tasks.filter((t) => t.escalations > 0).length;
+  return [
+    {
+      id: 'static',
+      level: 'syntactic',
+      title: 'Static and per-function compile checks during reconstruction',
+      outcome: open.length === 0 && failed.length === 0 ? 'passed' : 'failed',
+      detail:
+        `${quality.tasks.length} function task(s): ${failed.length} failed permanently, ${open.length} accepted with open findings, ` +
+        `${escalated} needed a stronger model.` +
+        (open.length > 0
+          ? ` Open: ${open
+              .slice(0, 5)
+              .map((t) => `${t.taskId} (${t.openIssues[0]})`)
+              .join('; ')}.`
+          : ''),
+    },
+  ];
+};
+
+const referenceChecks: ValidationCheck = ({ hasExecutableComparator, differential }) => [
+  differential
+    ? {
+        id: 'functional',
+        level: 'functional',
+        title: 'Functional equivalence (differential test against reference source)',
+        outcome: differential.outcome,
+        detail: differential.detail,
+      }
+    : {
+        id: 'functional',
+        level: 'functional',
+        title: 'Functional equivalence',
+        outcome: 'not-assessed',
+        detail: hasExecutableComparator
+          ? 'A differential spec is configured but produced no result.'
+          : 'No reference to compare against. Set validation.differentialSpec to a spec file that names reference source (see docs/validation.md); successful compilation does not imply equivalent behavior.',
+      },
   {
     id: 'fidelity',
     level: 'fidelity',
@@ -125,6 +184,7 @@ const referenceChecks: ValidationCheck = ({ hasExecutableComparator }) => [
 /** Registered validation checks, evaluated in order. Add new checks here. */
 export const VALIDATION_CHECKS: readonly ValidationCheck[] = [
   syntaxAndCompile,
+  staticChecks,
   coverage,
   aiReview,
   referenceChecks,

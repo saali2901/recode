@@ -11,6 +11,8 @@ export interface DecompileRequest {
   logFile: string;
   timeoutSeconds: number;
   maxFunctions: number;
+  /** Decompiler threads inside the backend (1 = sequential); backends may ignore it. */
+  decompilerThreads?: number;
   signal?: AbortSignal;
 }
 

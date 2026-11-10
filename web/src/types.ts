@@ -69,6 +69,56 @@ export interface TaskItem {
   status: Status;
   attempts: number;
   lastError: string | null;
+  /** Routing tier the task ran (or will run) at; null for plans from before routing existed. */
+  tier?: string | null;
+  escalations?: number;
+  fromCache?: boolean;
+  /** Findings the accepted result still has. */
+  openIssues?: string[];
+}
+
+export interface PerfSummary {
+  wallSeconds: number;
+  modelCalls: number;
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+  perModel: Array<{
+    tier: string;
+    model: string;
+    calls: number;
+    seconds: number;
+    inputTokens: number;
+    outputTokens: number;
+    failures: number;
+  }>;
+  meanQueueWaitSeconds: number;
+  cacheHitRate: number;
+  workersMax: number;
+  workersAverage: number;
+  retries: number;
+  escalations: number;
+  accepted: number;
+  failed: number;
+  compileErrors: number;
+}
+
+export interface PerfReport {
+  runId: string;
+  mode: string;
+  summary: PerfSummary;
+  counters: Record<string, number>;
+  phases: Record<string, number>;
+  analysis: { ghidraMs: number; decompilerThreads: number; functions: number } | null;
+}
+
+export type DependencyMode = 'adaptive' | 'complete' | 'signatures' | 'legacy';
+
+/** Per-run scheduler overrides sent with a reconstruct job. */
+export interface RunOptions {
+  sessions?: number;
+  dependencies?: DependencyMode;
+  noCache?: boolean;
 }
 
 export interface ValidationCheck {

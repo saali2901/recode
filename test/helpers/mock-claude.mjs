@@ -28,7 +28,7 @@ const flag = (name) => {
 if (process.env.MOCK_LOG) {
   fs.appendFileSync(
     process.env.MOCK_LOG,
-    `${JSON.stringify({ args, cwd: process.cwd(), prompt })}\n`,
+    `${JSON.stringify({ args, cwd: process.cwd(), prompt, subagentModel: process.env.CLAUDE_CODE_SUBAGENT_MODEL ?? null })}\n`,
   );
 }
 
@@ -74,13 +74,39 @@ const bump = (key) => {
   return seen[key];
 };
 
+const requestedModel = flag('--model');
 emit({
   type: 'system',
   subtype: 'init',
   session_id: 'mock-session',
-  model: 'mock',
+  model: requestedModel ? `mock-${requestedModel}` : 'mock',
   tools: ['Read', 'Write', 'Task'],
 });
+// A model listed here behaves like one the installed CLI does not know.
+if (
+  requestedModel &&
+  (process.env.MOCK_UNAVAILABLE_MODELS ?? '').split(',').includes(requestedModel)
+) {
+  emit({
+    type: 'result',
+    subtype: 'error_during_execution',
+    is_error: true,
+    result: `There's an issue with the selected model (${requestedModel}). It may not exist or you may not have access to it.`,
+    session_id: 'mock-session',
+  });
+  process.exit(1);
+}
+// Availability probe of ReCode ("Reply with the single word: ok").
+if (/Reply with the single word/.test(prompt) && !/Batch file/.test(prompt)) {
+  emit({
+    type: 'result',
+    subtype: 'success',
+    is_error: false,
+    result: 'ok',
+    session_id: 'mock-session',
+  });
+  process.exit(0);
+}
 emit({ type: 'future_event_type_nobody_knows', data: 1 });
 process.stdout.write('this line is not json\n');
 
@@ -114,7 +140,9 @@ if (mode === 'crash') {
 if (mode === 'hang') {
   setInterval(() => {}, 1000);
 } else {
-  run();
+  const latency = Number(process.env.MOCK_LATENCY_MS ?? '0');
+  if (latency > 0) setTimeout(run, latency);
+  else run();
 }
 
 function write(file, content) {
@@ -184,6 +212,10 @@ function run() {
         continue;
       }
       let code = fn.code;
+      // "needs:<function>:<model>": the function is only reconstructed with confidence by that subagent model.
+      const needs = /^needs:([^:]+):(.+)$/.exec(mode);
+      const subagentModel = process.env.CLAUDE_CODE_SUBAGENT_MODEL ?? flag('--model');
+      const weak = needs && needs[1] === task.ghidraName && subagentModel !== needs[2];
       if (mode === 'break-multiply' && task.ghidraName === 'multiply' && !task.repairContext)
         code = fn.broken;
       if (mode === 'wrong-address' && task.ghidraName === 'add_ints') task.address = '0xdead';
@@ -195,7 +227,7 @@ function run() {
         prototype: fn.prototype,
         code,
         includes: fn.includes ?? [],
-        confidence: 'probable',
+        confidence: weak ? 'speculative' : 'probable',
         assumptions: [{ text: 'Mock reconstruction from a fixed table.', confidence: 'certain' }],
       });
     }
@@ -209,6 +241,12 @@ function run() {
     total_cost_usd: 0.01,
     num_turns: 3,
     duration_ms: 10,
+    usage: {
+      input_tokens: 1000,
+      output_tokens: 200,
+      cache_read_input_tokens: 0,
+      cache_creation_input_tokens: 0,
+    },
   });
   process.exit(0);
 }
