@@ -12,10 +12,19 @@ export const CachedResultSchema = z.object({
   /** Concrete model the CLI reported, for the record. */
   resolvedModel: z.string().optional(),
   createdAt: z.string(),
+  /**
+   * Callee address -> hash of the reconstructed prototype the result was written against. The entry is only valid
+   * while those callees still have exactly these prototypes.
+   */
+  deps: z.record(z.string(), z.string()).default({}),
   /** The exact content of the result file the agent wrote. */
   payload: z.string(),
 });
 export type CachedResult = z.infer<typeof CachedResultSchema>;
+export type CachedResultInput = Omit<
+  z.input<typeof CachedResultSchema>,
+  'schemaVersion' | 'createdAt'
+>;
 
 /** Hash of the parts that decide whether a stored result is still valid. Order matters. */
 export function cacheKey(parts: readonly string[]): string {
@@ -53,7 +62,7 @@ export class ResultCache {
     return undefined;
   }
 
-  async put(entry: Omit<CachedResult, 'schemaVersion' | 'createdAt'>): Promise<void> {
+  async put(entry: CachedResultInput): Promise<void> {
     if (!this.enabled) return;
     await writeJsonAtomic(
       this.fileFor(entry.key),

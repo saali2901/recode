@@ -6,18 +6,24 @@ import { pathExists, readJson, writeJsonAtomic } from '../filesystem/files.js';
 
 const GIB = 1024 ** 3;
 
-const TierSchema = z
-  .object({
-    /** Model alias or ID passed to `claude --model`. Empty = Claude Code's default model. */
-    model: z.string().min(1).optional(),
-    /** Maximum number of concurrent sessions that use this tier (model capacity / rate limits). */
-    maxConcurrent: z.number().int().min(1).max(16).optional(),
-    /** Context window of the model in tokens; batches are sized to stay well below it. */
-    contextTokens: z.number().int().min(8_000).optional(),
-    /** Maximum number of function tasks per session at this tier. */
-    batchSize: z.number().int().min(1).max(50).optional(),
-  })
-  .strict();
+/** One routing tier. Every field has its own default, so a partial override ("batchSize" only) keeps the model. */
+const tierSchema = (defaults: { model: string; batchSize?: number }) =>
+  z
+    .object({
+      /** Model alias or ID passed to `claude --model`. */
+      model: z.string().min(1).default(defaults.model),
+      /** Maximum number of concurrent sessions that use this tier (model capacity / rate limits). */
+      maxConcurrent: z.number().int().min(1).max(16).optional(),
+      /** Context window of the model in tokens; batches are sized to stay well below it. */
+      contextTokens: z.number().int().min(8_000).default(200_000),
+      /** Maximum number of function tasks per session at this tier (default: `claude.batchSize`). */
+      batchSize:
+        defaults.batchSize === undefined
+          ? z.number().int().min(1).max(50).optional()
+          : z.number().int().min(1).max(50).default(defaults.batchSize),
+    })
+    .strict()
+    .prefault({});
 
 const RoutingSchema = z
   .object({
@@ -26,21 +32,16 @@ const RoutingSchema = z
     tiers: z
       .object({
         /** Trivial functions: getters, wrappers, tiny arithmetic. */
-        fast: TierSchema.default({ model: 'haiku', contextTokens: 200_000, batchSize: 12 }),
+        fast: tierSchema({ model: 'haiku', batchSize: 12 }),
         /** Ordinary reconstruction. */
-        standard: TierSchema.default({ model: 'sonnet', contextTokens: 200_000 }),
+        standard: tierSchema({ model: 'sonnet' }),
         /** Complex algorithms, heavy pointer arithmetic, indirect calls, recursion. */
-        advanced: TierSchema.default({ model: 'opus', contextTokens: 200_000, batchSize: 3 }),
+        advanced: tierSchema({ model: 'opus', batchSize: 3 }),
         /** Review and last resort for functions that failed at lower tiers. */
-        expert: TierSchema.default({ model: 'opus', contextTokens: 200_000, batchSize: 1 }),
+        expert: tierSchema({ model: 'opus', batchSize: 1 }),
       })
       .strict()
-      .default({
-        fast: { model: 'haiku', contextTokens: 200_000, batchSize: 12 },
-        standard: { model: 'sonnet', contextTokens: 200_000 },
-        advanced: { model: 'opus', contextTokens: 200_000, batchSize: 3 },
-        expert: { model: 'opus', contextTokens: 200_000, batchSize: 1 },
-      }),
+      .prefault({}),
     /** Difficulty score (0-100) from which a function needs the tier. */
     thresholds: z
       .object({
@@ -49,25 +50,14 @@ const RoutingSchema = z
         expert: z.number().min(0).max(100).default(80),
       })
       .strict()
-      .default({ standard: 15, advanced: 45, expert: 80 }),
+      .prefault({}),
     /** Check once per day that each configured model answers; unavailable tiers fall back to the next higher one. */
     verifyModels: z.boolean().default(true),
     /** Re-run weak results with the next tier, handing over the previous result and findings. */
     escalation: z.boolean().default(true),
   })
   .strict()
-  .default({
-    mode: 'auto',
-    tiers: {
-      fast: { model: 'haiku', contextTokens: 200_000, batchSize: 12 },
-      standard: { model: 'sonnet', contextTokens: 200_000 },
-      advanced: { model: 'opus', contextTokens: 200_000, batchSize: 3 },
-      expert: { model: 'opus', contextTokens: 200_000, batchSize: 1 },
-    },
-    thresholds: { standard: 15, advanced: 45, expert: 80 },
-    verifyModels: true,
-    escalation: true,
-  });
+  .prefault({});
 
 const SchedulerSchema = z
   .object({
@@ -85,14 +75,7 @@ const SchedulerSchema = z
     minFreeMemoryFraction: z.number().min(0).max(0.9).default(0.1),
   })
   .strict()
-  .default({
-    mode: 'adaptive',
-    maxSessions: 4,
-    initialSessions: 2,
-    maxGroupSize: 24,
-    maxLoadPerCpu: 0.9,
-    minFreeMemoryFraction: 0.1,
-  });
+  .prefault({});
 
 export const ConfigSchema = z
   .object({

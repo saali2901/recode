@@ -373,6 +373,7 @@ export async function reconstruct(
     const batchFile = await writeBatchFile(project, binary.id, name, spec);
     const relativeBatch = relativeToProject(project, batchFile);
     await prepareResultFiles(project, binary.id, tasks);
+    for (const task of tasks) dispatchSeen.set(task.id, seenCalleesOf(task));
     await store.start(
       tasks.map((t) => t.id),
       name,
@@ -494,15 +495,13 @@ export async function reconstruct(
     if (task.kind === 'function') {
       const dossier = dossierOf(task.address);
       if (!dossier) return undefined;
-      const callees = calleeViews(dossier, byAddress, results.functionResults)
-        .map((c) => `${c.address}:${c.status === 'reconstructed' ? protoHash(c.prototype) : 'sig'}`)
-        .sort();
+      // Callee prototypes are not part of the key: they are validated separately (CachedResult.deps), so the key
+      // does not depend on the order in which the scheduler happened to finish the callees.
       return cacheKey([
         promptHash,
         'function',
         dossier.contentHash,
         results.typesResult ? sha256Text(results.typesResult.header) : 'no-types',
-        ...callees,
       ]);
     }
     if (task.kind === 'types') {
@@ -527,11 +526,7 @@ export async function reconstruct(
     const key = keyFor(task);
     if (!key) return false;
     const hit = await cache.get(key);
-    if (!hit) {
-      metrics.counters.cacheMisses++;
-      return false;
-    }
-    if (tierIndexOf(hit.tier) < tierIndex(tier)) {
+    if (!hit || tierIndexOf(hit.tier) < tierIndex(tier) || !depsStillValid(task, hit.deps)) {
       metrics.counters.cacheMisses++;
       return false;
     }
@@ -556,22 +551,42 @@ export async function reconstruct(
       fromCache: true,
       tier: hit.tier,
       openIssues: [],
-      seenCallees: seenCalleesOf(task),
+      seenCallees: calleeTaskDeps(hit.deps),
       contextHash: promptHash,
     });
     events.emit({ type: 'task-completed', taskId: task.id, label: `${task.title} (cache)` });
     return true;
   }
 
+  /** Every callee the cached result was written against must be reconstructed with the same prototype now. */
+  function depsStillValid(task: Task, deps: Record<string, string>): boolean {
+    const dossier = dossierOf(task.address);
+    if (!dossier) return Object.keys(deps).length === 0;
+    return Object.entries(deps).every(([address, hash]) => {
+      const current = results.functionResults.get(functionTaskId(address));
+      return current?.status === 'reconstructed' && protoHash(current.prototype) === hash;
+    });
+  }
+
+  /** Callee task id -> prototype hash, from an address-keyed map. */
+  function calleeTaskDeps(deps: Record<string, string>): Record<string, string> {
+    return Object.fromEntries(
+      Object.entries(deps).map(([address, hash]) => [functionTaskId(address), hash]),
+    );
+  }
+
+  /** Callee address -> prototype hash for the callees that are reconstructed right now (what an agent would see). */
   function seenCalleesOf(task: Task): Record<string, string> {
     const dossier = dossierOf(task.address);
     if (!dossier) return {};
     const seen: Record<string, string> = {};
     for (const c of calleeViews(dossier, byAddress, results.functionResults)) {
-      if (c.status === 'reconstructed' && c.taskId) seen[c.taskId] = protoHash(c.prototype);
+      if (c.status === 'reconstructed') seen[c.address] = protoHash(c.prototype);
     }
     return seen;
   }
+  /** What each running task's agent was shown at dispatch; recorded with the accepted result. */
+  const dispatchSeen = new Map<string, Record<string, string>>();
 
   /** Decides what to do with one task after its session. Returns what happened. */
   async function judge(
@@ -652,7 +667,7 @@ export async function reconstruct(
       await store.complete(task.id, {
         tier,
         openIssues: issues,
-        seenCallees: seenCalleesOf(task),
+        seenCallees: calleeTaskDeps(dispatchSeen.get(task.id) ?? {}),
         contextHash: promptHash,
         fromCache: false,
       });
@@ -661,7 +676,14 @@ export async function reconstruct(
       const key = keyFor(task);
       if (advanced && clean && key) {
         const payload = await fs.readFile(resultPath(project, binary.id, task), 'utf8');
-        await writeCache.put({ key, kind: task.kind, tier, ...(model ? { model } : {}), payload });
+        await writeCache.put({
+          key,
+          kind: task.kind,
+          deps: dispatchSeen.get(task.id) ?? {},
+          tier,
+          ...(model ? { model } : {}),
+          payload,
+        });
       }
       return 'accepted';
     }

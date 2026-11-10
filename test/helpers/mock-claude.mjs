@@ -28,7 +28,7 @@ const flag = (name) => {
 if (process.env.MOCK_LOG) {
   fs.appendFileSync(
     process.env.MOCK_LOG,
-    `${JSON.stringify({ args, cwd: process.cwd(), prompt })}\n`,
+    `${JSON.stringify({ args, cwd: process.cwd(), prompt, subagentModel: process.env.CLAUDE_CODE_SUBAGENT_MODEL ?? null })}\n`,
   );
 }
 
@@ -212,6 +212,10 @@ function run() {
         continue;
       }
       let code = fn.code;
+      // "needs:<function>:<model>": the function is only reconstructed with confidence by that subagent model.
+      const needs = /^needs:([^:]+):(.+)$/.exec(mode);
+      const subagentModel = process.env.CLAUDE_CODE_SUBAGENT_MODEL ?? flag('--model');
+      const weak = needs && needs[1] === task.ghidraName && subagentModel !== needs[2];
       if (mode === 'break-multiply' && task.ghidraName === 'multiply' && !task.repairContext)
         code = fn.broken;
       if (mode === 'wrong-address' && task.ghidraName === 'add_ints') task.address = '0xdead';
@@ -223,7 +227,7 @@ function run() {
         prototype: fn.prototype,
         code,
         includes: fn.includes ?? [],
-        confidence: 'probable',
+        confidence: weak ? 'speculative' : 'probable',
         assumptions: [{ text: 'Mock reconstruction from a fixed table.', confidence: 'certain' }],
       });
     }
