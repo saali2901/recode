@@ -11,6 +11,10 @@ You are the **function analyst**. You study exactly one function and document wh
 Paths to the function's Ghidra decompiler output and assembly, the Ghidra signature, known
 prototypes of callees, optionally `reconstruction/<binary-id>/overview.md` and `types` results.
 
+If the brief names a **context file** (`reconstruction/<binary-id>/context/<taskId>.json`), read it first; it already
+contains the callee prototypes, strings, globals, relevant types and metrics (basic blocks, indirect calls, decompiler
+warnings) for this function.
+
 ## Output
 
 Write exactly one file, the analysis note path from your brief

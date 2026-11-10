@@ -30,18 +30,23 @@ place that connects the layers. External programs (Ghidra, Claude Code, CMake) a
 | `core/workflow`           | Per-binary step state machine (`pending/running/completed/failed/cancelled`), fingerprints                                            |
 | `core/tasks`              | Persistent reconstruction task list with dependencies, attempts, crash recovery                                                       |
 | `core/events`             | Typed event bus consumed by the CLI progress output and the log                                                                       |
+| `core/graph`              | Iterative Tarjan SCC, condensation (depth/height), Kahn topological order - no recursion                                              |
 | `input/parsers`           | Bounds-checked ELF, PE, Mach-O, COFF, DOL and GameCube disc parsers on a random-access file view                                      |
 | `input/adapters`          | `InputAdapter` implementations + `AdapterRegistry`                                                                                    |
 | `input/extractors/zip.ts` | Own safe ZIP reader (stored/deflate) with all limits                                                                                  |
 | `input/import-service.ts` | Detect → prepare → register in the project                                                                                            |
 | `decompiler/interfaces`   | `Decompiler` interface, Zod schemas of the analysis files                                                                             |
 | `decompiler/ghidra`       | Installation lookup, headless invocation, language IDs, per-platform import plan (`import-plan.ts`), staging + atomic swap of results |
+| `decompiler/analysis`     | Metrics from decompiler text + Ghidra facts, the per-function dossiers (analysis store)                                              |
 | `decompiler/scripts`      | `ExportAnalysis.java` (writes the JSON files) and `ImportDol.java` (rebuilds a DOL's memory map) – run inside Ghidra                  |
 | `ai/claude`               | `claude -p` runner and tolerant `stream-json` event parser                                                                            |
-| `ai/orchestration`        | Planner (task DAG), batch files, reconstruct loop, review, session log                                                                |
+| `ai/orchestration`        | Planner (SCC task DAG), scheduler (limiter, batch picker), reconstruct loop, context files, batch files, review, session log         |
+| `ai/routing`              | Difficulty score and tier router, escalation policy, routing history, model availability probe                                        |
 | `ai/prompts`              | Prompt builders and batch file schema                                                                                                 |
 | `reconstruction`          | `TargetLanguage` interface, result schemas, C project generator (`templates/c-project`)                                               |
-| `validation`              | CMake/Ninja build, diagnostics parser/attribution, registered validation checks                                                       |
+| `validation`              | CMake/Ninja build, diagnostics parser/attribution, static function validator, per-function compile check, differential tests, checks |
+| `infrastructure/cache`    | Content-addressed result cache                                                                                                        |
+| `infrastructure/monitoring` | Run metrics collector, summaries and comparison                                                                                     |
 
 ## Data flow and project layout
 
@@ -51,13 +56,16 @@ project/
 ├── input/  reference/          imported files (never overwritten); extracted archives below input/<name>/
 ├── analysis/<id>/              metadata.json  program.json  functions.json  references.json  symbols.json
 │   ├── decompiled/function_<addr>.c   asm/function_<addr>.asm        types.json  call-graph.json
-├── reconstruction/<id>/        overview.md  batches/*.json  results/<task>.json  reviews/<task>.json  validation.json
+│   └── facts.json (optional, Ghidra)  store.json (derived: metrics + content hash per function)
+├── reconstruction/<id>/        overview.md  batches/*.json  context/<task>.json  results/<task>.json  reviews/<task>.json
+│                               quality.json  validation.json
 ├── source/<id>/                include/recode_types.h  include/recode_functions.h  src/<name>.c
 │                               CMakeLists.txt  RECONSTRUCTION.md  .recode-generated.json
 ├── build/<id>/                 CMake/Ninja tree, diagnostics.json, build-report.json
 ├── .claude/                    agents/*.md, settings.json   (copied from templates/claude at init)
 ├── CLAUDE.md                   rules for the agents (untrusted data, boundaries, confidence vocabulary)
 └── .recode/                    workflow/<id>.json  tasks/<id>.json  sessions/<id>.jsonl  logs/  lock
+                                cache/results/<aa>/<key>.json   metrics/<id>/<run>.json  routing-history.json  models.json
 ```
 
 1. **import** – the registry asks every adapter to `detect()` by magic bytes and structure; the highest confidence
@@ -122,14 +130,48 @@ Reconstruction state is per task (`.recode/tasks/<id>.json`): `pending → runni
 `running` after a crash becomes `pending` again; a changed analysis (different function set) discards old task state.
 Every accepted agent result stays on disk in `reconstruction/<id>/results/`, so progress is never lost.
 
-## Reconstruction and agents
+## Reconstruction, routing and scheduling
 
-See [agents.md](agents.md) for roles and rules. In short, ReCode owns the **task DAG** (`overview → types → functions,
-callees before callers; recursion cycles broken`), writes a **batch file** per session, runs **one Claude Code session
-at a time** and lets Claude's native subagents do the parallel work. ReCode — not the agents — validates results
-(Zod schema, task id and address match, function defined in code, no `#include` in code, unique names) and only then
-marks a task completed. The C project is **generated by ReCode** from accepted results, so agents never write shared
-files (headers, CMake) and cannot conflict.
+See [agents.md](agents.md) for roles and rules and [optimization-report.md](optimization-report.md) for the measured
+effects. In short:
+
+1. **Analysis store.** Before any model runs, `buildAnalysisStore` reads every function once (bounded concurrency) and
+   derives a dossier: measured properties (lines, cyclomatic complexity, basic blocks, pointer arithmetic, distinct
+   struct offsets, indirect calls, decompiler warnings, `undefined` types, ...), callees with signatures, referenced
+   strings and globals, program types the decompiler output mentions, and a **content hash**. When `facts.json` exists
+   (exported by `ExportAnalysis.java`), basic blocks, indirect calls and data references come from Ghidra's program
+   database; otherwise they are estimated from the text. Decompiler pseudocode is treated as an interpretation of
+   the machine code - nothing in the dossier claims original names, types or structure.
+2. **Planner.** `planTasks` condenses the call graph into strongly connected components (Tarjan). Members of a
+   component (mutual recursion) form a **group** that is reconstructed in one session with consistent prototypes. The
+   condensation is a DAG, so no waiting cycles exist. Calls to other components are _soft_ dependencies in the default
+   `adaptive` mode, hard ones in `complete`, absent in `signatures`; `legacy` keeps the original planner. Every task gets a
+   critical-path priority.
+3. **Router.** Each function gets a difficulty score (0-100) from its measured properties, mutual recursion and the
+   failure history of similar functions, and a tier: `fast` (trivial, small, flat, fully lifted), `standard`, `advanced`,
+   `expert`. Tiers map to models in the configuration (`routing.tiers.*.model`, defaults are the Claude Code aliases
+   `haiku`, `sonnet`, `opus`); a pinned `claude.model` disables routing. Models are probed once a day with a one-word
+   request; an unusable tier falls back to the nearest usable one.
+4. **Scheduler.** An AIMD limiter (start `scheduler.initialSessions`, +1 after as many healthy sessions as the current
+   limit, halve on failure, hard cap `scheduler.maxSessions`, no new session while load per CPU or free RAM is out of
+   bounds) runs independent sessions concurrently. A session is one tier, at most the tier's batch size in functions,
+   limited by a share of the tier's context window; groups travel together. If no function is strictly ready and a
+   slot is free, functions whose only open dependencies are _soft_ start with the callee's Ghidra signature
+   (`relaxed starts`, counted in the metrics).
+5. **Agents.** The lead agent runs on the standard tier (it only coordinates and verifies); the specialists run on the
+   routed tier through `CLAUDE_CODE_SUBAGENT_MODEL`. Function agents get a task-specific **context file** instead of the
+   whole-program JSON files.
+6. **Validation and escalation.** Each result passes the structural check, the static validator and the per-function
+   compile check (see [validation.md](validation.md)). Findings escalate the function to the next stronger model _with_
+   the previous result and the findings; the same model is only repeated when the findings are new to it.
+7. **Cache.** Accepted clean results are stored content-addressed (`cache/results`). A task is served from the cache
+   when function content, prompts (agent definitions, `CLAUDE.md`, prompt version) and shared types are unchanged, the
+   cached tier is at least the requested one and every reconstructed callee still has the prototype the entry was
+   written against. A changed function resets only its own task; a changed callee prototype reopens only its callers.
+
+ReCode - not the agents - validates results and only then marks a task completed. The C project is **generated by
+ReCode** from accepted results, so agents never write shared files (headers, CMake) and cannot conflict.
+Generated files are only rewritten when their content changed, so Ninja rebuilds only what is affected.
 
 ## Security
 
@@ -150,14 +192,20 @@ files (headers, CMake) and cannot conflict.
 
 ## Limitations
 
-- Ghidra export script not yet executed against a real Ghidra by the author (see README); Ghidra language IDs for raw
+- The new parts of `ExportAnalysis.java` (facts export, optional multi-threaded decompilation) were compiled only against
+  stubs of the Ghidra API, never run against a real Ghidra. Facts sections fail soft (warnings in `facts.json`);
+  threads default to 1.
+- Ghidra export script of the original release was verified by the author only partly (see README); Ghidra language IDs for raw
   binaries (`decompiler/ghidra/language.ts`) may need adjusting for your Ghidra release.
-- No functional or fidelity validation; no comparison with a reference executable (the interface point is
-  `VALIDATION_CHECKS` / `CheckInput.hasExecutableComparator`).
-- Parallel subagent limit is an instruction to the lead agent. Hard limits are `batchSize` (tasks per session) and
-  one session at a time.
-- Dependency waves: a function is only reconstructed after its callees, so deep call chains need many small sessions
-  (this is slower, but yields better prototypes for callers).
+- Functional validation exists only against user-supplied reference _source_ (differential test, opt-in); there is no
+  comparison with the original executable and no fidelity measurement.
+- The subagent limit (`claude.maxParallelAgents`) is an instruction to the lead agent and applies per session; the number of
+  concurrent sessions is a hard limit (`scheduler.maxSessions`), so up to `maxSessions × maxParallelAgents` subagents can
+  run at once. `CLAUDE_CODE_SUBAGENT_MODEL` is the documented way to choose the subagent model; its effect with the
+  installed CLI is verified by the model probe only for the main thread (see optimization-report.md).
+- In `adaptive` mode a caller may be reconstructed against the decompiler signature of a callee that is still being
+  reconstructed. A mismatch is caught by the per-function compile check, the alias macros in the generated header,
+  the project build and the repair rounds - not prevented. Use `--dependencies complete` to forbid it.
 - GameCube: `ImportDol.java` was verified with Ghidra 12.2 on one homebrew DOL only. Ghidra 12.2 has no Gekko language, so
   paired-singles code decodes incorrectly (generic PowerPC fallback). Only the boot DOL of a disc is extracted (no `.rel` modules or other disc files). The r2/r13 scan only
   recognizes straight `lis`/`addi`/`ori` loads near the entry point; other startup code leaves them unresolved. Discs inside a ZIP are limited by

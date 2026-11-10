@@ -4,7 +4,7 @@
 // It measures ReCode's own scheduling/persistence overhead and the effect of simulated session latency;
 // it says NOTHING about the quality of AI output.
 //
-// Usage: node scripts/bench.mjs <dist-dir> [--functions N] [--latency-ms MS] [--seed S] [--shape layered|chain|wide|cycles] [--legacy] [--compile] [--json]
+// Usage: node scripts/bench.mjs <dist-dir> [--functions N] [--latency-ms MS] [--seed S] [--shape layered|chain|wide|cycles] [--mode adaptive|complete|signatures|legacy] [--compile] [--json]
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -20,7 +20,8 @@ const N = Number(opt('functions', '1000'));
 const latencyMs = Number(opt('latency-ms', '0'));
 const seed = Number(opt('seed', '1'));
 const shape = opt('shape', 'layered');
-const legacy = argv.includes('--legacy');
+const schedulerMode = opt('mode', argv.includes('--legacy') ? 'legacy' : 'adaptive');
+const legacy = schedulerMode === 'legacy';
 const asJson = argv.includes('--json');
 const withCompile = argv.includes('--compile');
 
@@ -180,7 +181,7 @@ const runSession = async (request) => {
 
 const config = parseConfig({
   claude: { batchSize: 6 },
-  ...(legacy ? { scheduler: { mode: 'legacy' } } : {}),
+  scheduler: { mode: schedulerMode },
 });
 const t0 = performance.now();
 const rssBefore = process.memoryUsage().rss;
@@ -204,7 +205,7 @@ const result = {
   shape,
   functions: N,
   latencyMs,
-  legacy,
+  mode: schedulerMode,
   wallMs: Math.round(wallMs),
   sessions: sessionsRun,
   maxConcurrentSessions: maxInFlight,

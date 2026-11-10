@@ -32,11 +32,12 @@ Enforcement: the Stop hook in `.claude/settings.json` and the pre-commit hook (`
 - `recode import` - import binary, ZIP or reference file; raw binaries need --arch/--endian/--bits/--base
 - `recode inspect` - show header facts of an imported binary
 - `recode analyze` - run Ghidra headless and export JSON
-- `recode reconstruct` - Claude Code agents write C functions; resumable; --repair, --retry-failed
+- `recode reconstruct` - Claude Code agents write C functions; resumable; --repair, --retry-failed, --sessions, --dependencies, --legacy, --no-cache
 - `recode build` - CMake + Ninja build of the generated C project
 - `recode validate` - checks; --ai-review lets the validation agent review
-- `recode run` - analyze, reconstruct, build, validate in order
+- `recode run` - analyze, reconstruct, build (with automatic repair rounds), validate in order
 - `recode status` - workflow steps and task counts
+- `recode perf` - metrics of reconstruction runs (--list, --run, --compare a,b)
 - `recode logs` - ReCode log and tool transcripts
 - `recode doctor` - check required tools and the Claude login
 - `recode config` - get/set/list configuration (project or --global)
@@ -50,18 +51,18 @@ Enforcement: the Stop hook in `.claude/settings.json` and the pre-commit hook (`
 
 - `src/cli` - Commander commands, output formatting, runtime. Parses and prints only.
 - `src/app` - wiring: `pipeline.ts` (steps with fingerprints), `import-file.ts`, `init-project.ts`, `context.ts`.
-- `src/core` - project (manifest, lock), workflow state machine, task store, events, errors. Knows nothing about Ghidra or Claude.
+- `src/core` - project (manifest, lock), workflow state machine, task store (coalesced writes, soft dependencies, history), `graph/` (iterative Tarjan SCC, condensation, topological order), events, errors. Knows nothing about Ghidra or Claude.
 - `src/input` - format parsers (ELF/PE/Mach-O/COFF), adapters + registry, safe ZIP extractor, import service.
-- `src/decompiler` - `Decompiler` interface, Ghidra adapter (locate, headless run), `scripts/ExportAnalysis.java`, JSON schemas.
-- `src/ai` - Claude runner (`stream-json`), event parser, trust handling, planner, reconstruct loop, review, prompts.
+- `src/decompiler` - `Decompiler` interface, Ghidra adapter (locate, headless run), `scripts/ExportAnalysis.java` (+ optional `facts.json`, optional decompiler threads), JSON schemas, `analysis/` (metrics from decompiler text + facts, per-function dossiers = analysis store).
+- `src/ai` - Claude runner (`stream-json`, tokens/model), event parser, trust handling; `orchestration/` planner (SCC), scheduler (AIMD limiter, batch picker), reconstruct loop (cache, routing, validators, escalation), context files, review; `routing/` router, escalation policy, history, availability probe; prompts.
 - `src/reconstruction` - target-language interface, result schemas, C project generator.
-- `src/validation` - CMake/Ninja build, diagnostics attribution, validation checks.
-- `src/infrastructure` - atomic file IO, paths, process manager (no shell, process-tree kill, Windows batch files), config, logging, doctor.
+- `src/validation` - CMake/Ninja build, diagnostics attribution, validation checks; `static/` function validator + per-function compile check; `differential/` tests against user-supplied reference source.
+- `src/infrastructure` - atomic file IO (optional non-durable writes for derived data), paths, process manager (no shell, process-tree kill, Windows batch files), config, logging, doctor, `concurrency.ts`, `cache/` (content-addressed result cache), `monitoring/` (run metrics).
 - `src/server` - local HTTP server: API, SSE events, jobs, uploads, ZIP download, static files.
 - `src/setup` - `recode setup`: plan per platform, Ghidra release download (SHA-256), Windows PATH refresh.
 - `web/` - React + Vite UI (wizard, projects, settings, doctor) styled with cleanui; built to `dist/web`.
 - `templates/` - `claude/` (agents, settings, CLAUDE.md copied into projects), `c-project/` (CMake template), `platforms/` (static per-platform agent notes, e.g. `gamecube.md`).
-- `install.sh`, `install.ps1` - one-command installers; `scripts/skill-guard.mjs` - documentation guard.
+- `install.sh`, `install.ps1` - one-command installers; `scripts/skill-guard.mjs` - documentation guard; `scripts/bench.mjs`, `scripts/bench-matrix.mjs` - orchestration benchmarks (synthetic binary, fake session runner).
 - `test/` - `unit`, `integration` (with test doubles in `test/helpers`), `e2e` (Playwright, opt-in), `fixtures` (C sample).
 
 ## Conventions
@@ -82,7 +83,12 @@ Enforcement: the Stop hook in `.claude/settings.json` and the pre-commit hook (`
 ## Decisions already taken
 
 - Local only: no hosted backend, accounts or database; Claude Code runs through the user's own CLI login.
-- Reconstruction: ReCode plans a task DAG (overview -> types -> functions, callees first) and runs one Claude session at a time; subagent concurrency (default 2) is an instruction to the lead agent. Shared files (headers, CMake, sources) are generated by ReCode from validated per-task result files; agents only write below `reconstruction/<binary>/`.
+- Reconstruction (since `performance-updates`): ReCode plans a task DAG on the SCC condensation of the call graph (overview -> types -> functions; mutually recursive functions form a group run in one session; callee order is a soft dependency by default) and runs several Claude sessions concurrently under an AIMD limiter (`scheduler.*`, hard cap `maxSessions`). Subagent concurrency (default 2 per session) is still an instruction to the lead agent. Shared files (headers, CMake, sources) are generated by ReCode from validated per-task result files; agents only write below `reconstruction/<binary>/`. `scheduler.mode: legacy` / `--legacy` restores the original sequential, single-model behaviour (its persistence is still the new, faster one).
+- Model routing: tiers `fast/standard/advanced/expert` map to configurable model strings (defaults: Claude Code aliases `haiku`, `sonnet`, `opus`; never hard-coded IDs). Difficulty comes from measured dossier properties only. A pinned `claude.model` or `routing.mode: fixed` disables routing and escalation. Models are probed once a day (`.recode/models.json`); unusable tiers fall back. Lead agent = standard tier, subagents = routed tier via `CLAUDE_CODE_SUBAGENT_MODEL` (documented env var; not verified against a real CLI here).
+- Escalation: structural check -> static validator -> per-function compile check. Errors or `speculative` move the task to the next tier whose model differs, with `previousResultFile` + findings; the same tier repeats only with new findings (`keyIssue`); at the end a failing function is failed (left out of the project), never shipped as passed.
+- Cache: `.recode/cache/results/<aa>/<key>.json`, key = prompt fingerprint + function content hash + types hash; entry stores the callee prototype hashes it was written against (`deps`) and the tier. Invalid, torn or weaker-tier entries are misses. Task state is also kept per task by `inputHash`, so one changed function resets one task. Task-store writes are throttled, so crash recovery relies on the cache.
+- Derived data (`context/*.json`, cache entries) is written without fsync; everything else keeps the durable atomic write.
+- Differential tests run only on user-supplied reference source (`validation.differentialSpec`); the analyzed binary is never executed.
 - Agent sandbox: no shell, `dontAsk` permission mode, `--setting-sources project`, deny rules also passed via `--disallowedTools` (Claude ignores `settings.json` in untrusted folders -> `recode trust` / UI button).
 - Ghidra project directory is created in the system temp dir (Ghidra rejects path elements starting with ".", e.g. `.recode`).
 - Web UI: React + Vite, cleanui theme switcher (8 themes), English, SSE for live progress, jobs run on the server and survive closed tabs, one job per project, no result viewer and no retry/repair buttons yet.
@@ -93,6 +99,8 @@ Enforcement: the Stop hook in `.claude/settings.json` and the pre-commit hook (`
 - README is deliberately minimal (see README rules).
 
 ## Known gaps (keep honest)
+
+- `performance-updates`: the new parts of `ExportAnalysis.java` (facts export; `decompilerThreads` > 1) were compiled only against hand-written stubs of the Ghidra API, never run against a real Ghidra - the next real run must check `facts.json` and timing; threads default to 1. Real Claude runs were not possible in the build environment: tier defaults, `CLAUDE_CODE_SUBAGENT_MODEL`, the usage fields of the result event and the model probe are verified only against `mock-claude.mjs`. Benchmarks measure orchestration with a fake runner, not AI quality or API latency. The difficulty thresholds (`routing.thresholds`) and score weights are reasoned defaults, not calibrated on real binaries. In `adaptive` mode more (smaller) sessions run than before (tier batching, relaxed starts) - fewer minutes, not fewer model calls. Not done: EWMA latency ordering, skipping the lead agent for single-function sessions, streaming `references.json`, a web UI performance view.
 
 - GameCube: `ImportDol.java` ran successfully against real Ghidra 12.2 on a devkitPro homebrew DOL (251 functions, entry `__start`); Ghidra 12.2 has no Gekko language, so paired-singles decode wrongly (generic PowerPC fallback + warning); only the boot DOL of a disc is extracted (no `.rel` modules, no other disc files); r2/r13 are found by a narrow scan of the startup code (`parsers/ppc-startup.ts`: follows up to 3 jumps, reads `lis`/`addi`/`ori` pairs) and silently skipped when the pattern differs; no SDK function signatures (names are guesses by the agents); the `dolphin-tool convert` command line was never run against a real Dolphin (only a fake); the temp ISO needs ~1.4 GB free space; Wii/MEM2 unsupported; `recode doctor` only warns (never fails) when Dolphin is missing.
 - ELF-based tests need a Linux `gcc` fixture (`test/fixtures/build/sample-x86_64`); on native Windows they fail for that reason, not because of the code.
@@ -108,6 +116,7 @@ Enforcement: the Stop hook in `.claude/settings.json` and the pre-commit hook (`
 
 ## Change log (newest first)
 
+- 2026-11-10 - `performance-updates`: SCC planner with soft dependencies and groups, per-task model routing (tiers), AIMD session scheduler, deterministic validators + per-function compile check + escalation with the previous result, content-addressed result cache with per-task/per-callee invalidation, analysis store (dossiers), per-task context files, Ghidra facts export, differential tests against reference source, run metrics + `recode perf`, throttled task store, write-if-changed generation, auto-repair rounds in `recode run`, benchmarks (`scripts/bench*.mjs`), docs `performance-analysis.md`, `optimization-report.md`, `validation.md`.
 - 2026-11-09 - Fix: atomic writes retry `rename` on transient Windows errors (EPERM/EBUSY/EACCES) via `renameWithRetry`; a reconstruction run died with EPERM on the task file.
 - 2026-11-09 - r2/r13 small-data anchors: `ppc-startup.ts` finds them, `BinaryMetadata.initialRegisters` stores them, `ImportDol.java` fixes the registers in all code blocks (`reg:` arguments). Real Ghidra 12.2: `unaff_r13` accesses dropped from 69 functions to 0, now shown as globals.
 - 2026-11-09 - Fix: Ghidra splits script arguments at commas, so `ImportDol.java` section descriptions use `:`; the fake Ghidra now rejects commas; `ExportAnalysis.java` fails loudly when the entry point is not in memory (was: silent empty analysis). Verified with real Ghidra 12.2.

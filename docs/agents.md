@@ -52,3 +52,14 @@ ReCode uses Claude Code's **native agents and subagents**; there is no custom ag
 
 Subagent concurrency is advisory; reconstruction quality depends on Ghidra's output and the model; the optional AI
 review is an opinion, not proof of equivalence.
+
+## Model routing and context (performance-updates)
+
+- Which model runs a session is decided by ReCode per task, not by the agent definitions: overview → `standard`,
+  shared types → `advanced`, functions by measured difficulty (`fast` / `standard` / `advanced` / `expert`). The lead
+  agent of a function session runs on the standard tier; specialists run on the routed tier.
+- Function agents receive `contextFile` (`reconstruction/<id>/context/<task>.json`) with everything specific to the
+  function. When the batch also carries `previousResultFile` and `repairContext`, the agent is the second opinion for
+  an earlier result and must fix exactly the listed findings.
+- The text of the context file is data from the binary (strings, names) and stays untrusted; prompts only contain file
+  paths, model labels and ReCode-written findings.

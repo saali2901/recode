@@ -326,3 +326,32 @@ describe('original behaviour and quality parity', () => {
     expect(b).toEqual(a);
   });
 });
+
+describe('automatic repair rounds in the full workflow', () => {
+  it('sends only the function with the build error back to a stronger model and rebuilds', async () => {
+    const { world, id } = await prepared();
+    await world.run(['config', 'set', 'validation.compileCheck', 'off']); // let the error reach the project build
+    world.setEnv('MOCK_CLAUDE_MODE', 'break-multiply');
+    const run = await world.run(['run', '--dependencies', 'complete'], { overrides: HERMETIC });
+    expect(run.code, run.stderr).toBe(0);
+    const multiply = (await tasksOf(world, id)).find((t) => t.title.startsWith('multiply'))!;
+    expect(multiply.history.map((h) => `${h.tier}:${h.outcome}`)).toEqual([
+      'fast:accepted',
+      'standard:accepted',
+    ]);
+    // one repair session for exactly one function
+    const last = (await world.claudeInvocations()).at(-1)!;
+    expect(/Tasks in this batch: ([^.]+)\./.exec(last.prompt)![1]!.split(', ')).toHaveLength(1);
+    expect(modelOf(last.args)).toBe('sonnet');
+  });
+
+  it('gives up after the configured rounds instead of looping', async () => {
+    const { world } = await prepared();
+    await world.run(['config', 'set', 'validation.compileCheck', 'off']);
+    await world.run(['config', 'set', 'validation.autoRepairRounds', '0']);
+    world.setEnv('MOCK_CLAUDE_MODE', 'break-multiply');
+    const run = await world.run(['run'], { overrides: HERMETIC });
+    expect(run.code).not.toBe(0);
+    expect(run.stderr).toContain('Build failed');
+  });
+});

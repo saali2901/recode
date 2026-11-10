@@ -4,6 +4,7 @@ import { z } from 'zod';
 import {
   analyzeStep,
   buildStep,
+  buildWithRepairs,
   reconstructStep,
   validateStep,
   type PipelineDeps,
@@ -149,7 +150,14 @@ async function executeSteps(
   if (wants('reconstruct')) {
     note('reconstruct', (await reconstructStep(deps, binary, { force })).summary);
   }
-  if (wants('build')) note('build', (await buildStep(deps, binary, { force })).summary);
+  if (wants('build')) {
+    // The full workflow repairs functions with build errors in a few targeted rounds; a single build step does not.
+    const build =
+      request.step === 'run'
+        ? (await buildWithRepairs(deps, binary)).build
+        : await buildStep(deps, binary, { force });
+    note('build', build.summary);
+  }
   if (wants('validate')) {
     note(
       'validate',
