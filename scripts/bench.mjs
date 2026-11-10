@@ -21,7 +21,6 @@ const latencyMs = Number(opt('latency-ms', '0'));
 const seed = Number(opt('seed', '1'));
 const shape = opt('shape', 'layered');
 const schedulerMode = opt('mode', argv.includes('--legacy') ? 'legacy' : 'adaptive');
-const legacy = schedulerMode === 'legacy';
 const asJson = argv.includes('--json');
 const withCompile = argv.includes('--compile');
 

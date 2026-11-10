@@ -23,30 +23,30 @@ place that connects the layers. External programs (Ghidra, Claude Code, CMake) a
 
 ## Modules
 
-| Module                    | Responsibility                                                                                                                        |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `core/errors`             | `RecodeError` with stable codes → CLI exit codes                                                                                      |
-| `core/project`            | Project directory, `recode.json` manifest, binary registry (by SHA-256), lock file                                                    |
-| `core/workflow`           | Per-binary step state machine (`pending/running/completed/failed/cancelled`), fingerprints                                            |
-| `core/tasks`              | Persistent reconstruction task list with dependencies, attempts, crash recovery                                                       |
-| `core/events`             | Typed event bus consumed by the CLI progress output and the log                                                                       |
-| `core/graph`              | Iterative Tarjan SCC, condensation (depth/height), Kahn topological order - no recursion                                              |
-| `input/parsers`           | Bounds-checked ELF, PE, Mach-O, COFF, DOL and GameCube disc parsers on a random-access file view                                      |
-| `input/adapters`          | `InputAdapter` implementations + `AdapterRegistry`                                                                                    |
-| `input/extractors/zip.ts` | Own safe ZIP reader (stored/deflate) with all limits                                                                                  |
-| `input/import-service.ts` | Detect → prepare → register in the project                                                                                            |
-| `decompiler/interfaces`   | `Decompiler` interface, Zod schemas of the analysis files                                                                             |
-| `decompiler/ghidra`       | Installation lookup, headless invocation, language IDs, per-platform import plan (`import-plan.ts`), staging + atomic swap of results |
-| `decompiler/analysis`     | Metrics from decompiler text + Ghidra facts, the per-function dossiers (analysis store)                                              |
-| `decompiler/scripts`      | `ExportAnalysis.java` (writes the JSON files) and `ImportDol.java` (rebuilds a DOL's memory map) – run inside Ghidra                  |
-| `ai/claude`               | `claude -p` runner and tolerant `stream-json` event parser                                                                            |
-| `ai/orchestration`        | Planner (SCC task DAG), scheduler (limiter, batch picker), reconstruct loop, context files, batch files, review, session log         |
-| `ai/routing`              | Difficulty score and tier router, escalation policy, routing history, model availability probe                                        |
-| `ai/prompts`              | Prompt builders and batch file schema                                                                                                 |
-| `reconstruction`          | `TargetLanguage` interface, result schemas, C project generator (`templates/c-project`)                                               |
-| `validation`              | CMake/Ninja build, diagnostics parser/attribution, static function validator, per-function compile check, differential tests, checks |
-| `infrastructure/cache`    | Content-addressed result cache                                                                                                        |
-| `infrastructure/monitoring` | Run metrics collector, summaries and comparison                                                                                     |
+| Module                      | Responsibility                                                                                                                        |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `core/errors`               | `RecodeError` with stable codes → CLI exit codes                                                                                      |
+| `core/project`              | Project directory, `recode.json` manifest, binary registry (by SHA-256), lock file                                                    |
+| `core/workflow`             | Per-binary step state machine (`pending/running/completed/failed/cancelled`), fingerprints                                            |
+| `core/tasks`                | Persistent reconstruction task list with dependencies, attempts, crash recovery                                                       |
+| `core/events`               | Typed event bus consumed by the CLI progress output and the log                                                                       |
+| `core/graph`                | Iterative Tarjan SCC, condensation (depth/height), Kahn topological order - no recursion                                              |
+| `input/parsers`             | Bounds-checked ELF, PE, Mach-O, COFF, DOL and GameCube disc parsers on a random-access file view                                      |
+| `input/adapters`            | `InputAdapter` implementations + `AdapterRegistry`                                                                                    |
+| `input/extractors/zip.ts`   | Own safe ZIP reader (stored/deflate) with all limits                                                                                  |
+| `input/import-service.ts`   | Detect → prepare → register in the project                                                                                            |
+| `decompiler/interfaces`     | `Decompiler` interface, Zod schemas of the analysis files                                                                             |
+| `decompiler/ghidra`         | Installation lookup, headless invocation, language IDs, per-platform import plan (`import-plan.ts`), staging + atomic swap of results |
+| `decompiler/analysis`       | Metrics from decompiler text + Ghidra facts, the per-function dossiers (analysis store)                                               |
+| `decompiler/scripts`        | `ExportAnalysis.java` (writes the JSON files) and `ImportDol.java` (rebuilds a DOL's memory map) – run inside Ghidra                  |
+| `ai/claude`                 | `claude -p` runner and tolerant `stream-json` event parser                                                                            |
+| `ai/orchestration`          | Planner (SCC task DAG), scheduler (limiter, batch picker), reconstruct loop, context files, batch files, review, session log          |
+| `ai/routing`                | Difficulty score and tier router, escalation policy, routing history, model availability probe                                        |
+| `ai/prompts`                | Prompt builders and batch file schema                                                                                                 |
+| `reconstruction`            | `TargetLanguage` interface, result schemas, C project generator (`templates/c-project`)                                               |
+| `validation`                | CMake/Ninja build, diagnostics parser/attribution, static function validator, per-function compile check, differential tests, checks  |
+| `infrastructure/cache`      | Content-addressed result cache                                                                                                        |
+| `infrastructure/monitoring` | Run metrics collector, summaries and comparison                                                                                       |
 
 ## Data flow and project layout
 
